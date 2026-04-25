@@ -303,7 +303,8 @@ local ICONS = {
     Movement = "rbxassetid://10709768538",
     Visuals = "rbxassetid://10723346959",
     Misc = "rbxassetid://10709810948",
-    Config = "rbxassetid://10723374641"
+    Config = "rbxassetid://10723374641",
+    ["Games Scripts"] = "rbxassetid://10747372992"
 }
 
 -- [[ GUI CREATION ]]
@@ -3049,6 +3050,276 @@ pConfig:addButton("Refresh List", function()
 end)
 
 table.insert(panels, pConfig)
+
+-- 6. GAMES SCRIPTS
+local pGamesScripts = CategoryPanel.new("Games Scripts", startX + (panelW + gap)*5, 50, panelW)
+
+-- Ohio Aimbot button
+pGamesScripts:addButton("Ohio Aimbot", function()
+    local success, err = pcall(function()
+        -- Ohio Aimbot встроенный код
+        if not getgenv then
+            getgenv = function() return _G end
+        end
+
+        getgenv().ohio_settings = {
+            enabled = false,
+            fov = 150,
+            smooth = true,
+            smooth_amount = 0.15,
+            prediction = true,
+            prediction_amount = 0.12,
+            toggle_key = Enum.KeyCode.Q,
+        }
+
+        local OhioPlayers = game:GetService("Players")
+        local OhioRunService = game:GetService("RunService")
+        local OhioUserInput = game:GetService("UserInputService")
+        local OhioLocalPlayer = OhioPlayers.LocalPlayer
+        local OhioCamera = workspace.CurrentCamera
+
+        local OhioTarget = nil
+        local OhioFOV = Drawing.new("Circle")
+        OhioFOV.Thickness = 2
+        OhioFOV.Color = Color3.fromRGB(255, 255, 255)
+        OhioFOV.Transparency = 1
+        OhioFOV.Visible = true
+        OhioFOV.NumSides = 64
+
+        local function getOhioClosest()
+            local closest = nil
+            local shortestDist = getgenv().ohio_settings.fov
+            local mousePos = OhioUserInput:GetMouseLocation()
+            
+            for _, player in pairs(OhioPlayers:GetPlayers()) do
+                if player ~= OhioLocalPlayer and player.Character then
+                    local hum = player.Character:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health > 0 then
+                        local head = player.Character:FindFirstChild("Head")
+                        if head then
+                            local screenPos, onScreen = OhioCamera:WorldToViewportPoint(head.Position)
+                            if onScreen then
+                                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                                if dist < shortestDist then
+                                    closest = head
+                                    shortestDist = dist
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            return closest
+        end
+
+        local function getOhioPredicted(part)
+            if not part or not part.Parent then
+                return part and part.Position or Vector3.new(0, 0, 0)
+            end
+            local vel = part.Velocity
+            return part.Position + (vel * getgenv().ohio_settings.prediction_amount)
+        end
+
+        local function updateOhioAim()
+            if not getgenv().ohio_settings.enabled then
+                OhioTarget = nil
+                return
+            end
+            
+            if not OhioUserInput:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+                OhioTarget = nil
+                return
+            end
+            
+            OhioTarget = getOhioClosest()
+            if not OhioTarget then return end
+            
+            local targetPos = getgenv().ohio_settings.prediction and getOhioPredicted(OhioTarget) or OhioTarget.Position
+            
+            if getgenv().ohio_settings.smooth then
+                local currentCF = OhioCamera.CFrame
+                local targetLook = (targetPos - currentCF.Position).Unit
+                local currentLook = currentCF.LookVector
+                local smoothLook = currentLook:Lerp(targetLook, getgenv().ohio_settings.smooth_amount)
+                OhioCamera.CFrame = CFrame.new(currentCF.Position, currentCF.Position + smoothLook)
+            else
+                OhioCamera.CFrame = CFrame.new(OhioCamera.CFrame.Position, targetPos)
+            end
+        end
+
+        OhioRunService.RenderStepped:Connect(function()
+            OhioFOV.Visible = true
+            OhioFOV.Radius = getgenv().ohio_settings.fov
+            OhioFOV.Position = OhioUserInput:GetMouseLocation()
+        end)
+
+        OhioRunService:BindToRenderStep("Ohio_Aimbot", Enum.RenderPriority.Last.Value + 1, updateOhioAim)
+
+        OhioUserInput.InputBegan:Connect(function(input, gp)
+            if gp then return end
+            if input.KeyCode == getgenv().ohio_settings.toggle_key then
+                getgenv().ohio_settings.enabled = not getgenv().ohio_settings.enabled
+                local status = getgenv().ohio_settings.enabled and "ON" or "OFF"
+                game.StarterGui:SetCore("SendNotification", {
+                    Title = "Ohio Aimbot",
+                    Text = "Aimbot: " .. status,
+                    Duration = 2
+                })
+            end
+        end)
+
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "Ohio Aimbot",
+            Text = "Loaded! Press Q to toggle",
+            Duration = 3
+        })
+    end)
+    
+    if success then
+        print("[Games Scripts] Ohio Aimbot loaded successfully!")
+    else
+        warn("[Games Scripts] Failed to load Ohio Aimbot:", err)
+    end
+end)
+
+-- Arsenal Aimbot button
+pGamesScripts:addButton("Arsenal Aimbot", function()
+    local success, err = pcall(function()
+        -- Arsenal Aimbot встроенный код
+        if not getgenv then
+            getgenv = function() return _G end
+        end
+
+        getgenv().arsenal_settings = {
+            enabled = false,
+            fov = 200,
+            smooth = true,
+            smooth_amount = 0.2,
+            prediction = true,
+            prediction_amount = 0.15,
+            toggle_key = Enum.KeyCode.E,
+            auto_shoot = false,
+        }
+
+        local ArsenalPlayers = game:GetService("Players")
+        local ArsenalRunService = game:GetService("RunService")
+        local ArsenalUserInput = game:GetService("UserInputService")
+        local ArsenalLocalPlayer = ArsenalPlayers.LocalPlayer
+        local ArsenalCamera = workspace.CurrentCamera
+
+        local ArsenalTarget = nil
+        local ArsenalFOV = Drawing.new("Circle")
+        ArsenalFOV.Thickness = 2
+        ArsenalFOV.Color = Color3.fromRGB(255, 100, 100)
+        ArsenalFOV.Transparency = 1
+        ArsenalFOV.Visible = true
+        ArsenalFOV.NumSides = 64
+
+        local function getArsenalClosest()
+            local closest = nil
+            local shortestDist = getgenv().arsenal_settings.fov
+            local mousePos = ArsenalUserInput:GetMouseLocation()
+            
+            for _, player in pairs(ArsenalPlayers:GetPlayers()) do
+                if player ~= ArsenalLocalPlayer and player.Character then
+                    local hum = player.Character:FindFirstChildOfClass("Humanoid")
+                    if hum and hum.Health > 0 then
+                        -- Arsenal использует Torso/UpperTorso для лучшего попадания
+                        local torso = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
+                        if torso then
+                            local screenPos, onScreen = ArsenalCamera:WorldToViewportPoint(torso.Position)
+                            if onScreen then
+                                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                                if dist < shortestDist then
+                                    closest = torso
+                                    shortestDist = dist
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            return closest
+        end
+
+        local function getArsenalPredicted(part)
+            if not part or not part.Parent then
+                return part and part.Position or Vector3.new(0, 0, 0)
+            end
+            local vel = part.Velocity
+            return part.Position + (vel * getgenv().arsenal_settings.prediction_amount)
+        end
+
+        local function updateArsenalAim()
+            if not getgenv().arsenal_settings.enabled then
+                ArsenalTarget = nil
+                return
+            end
+            
+            if not ArsenalUserInput:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
+                ArsenalTarget = nil
+                return
+            end
+            
+            ArsenalTarget = getArsenalClosest()
+            if not ArsenalTarget then return end
+            
+            local targetPos = getgenv().arsenal_settings.prediction and getArsenalPredicted(ArsenalTarget) or ArsenalTarget.Position
+            
+            if getgenv().arsenal_settings.smooth then
+                local currentCF = ArsenalCamera.CFrame
+                local targetLook = (targetPos - currentCF.Position).Unit
+                local currentLook = currentCF.LookVector
+                local smoothLook = currentLook:Lerp(targetLook, getgenv().arsenal_settings.smooth_amount)
+                ArsenalCamera.CFrame = CFrame.new(currentCF.Position, currentCF.Position + smoothLook)
+            else
+                ArsenalCamera.CFrame = CFrame.new(ArsenalCamera.CFrame.Position, targetPos)
+            end
+            
+            -- Auto shoot (опционально)
+            if getgenv().arsenal_settings.auto_shoot and ArsenalTarget then
+                mouse1press()
+                wait(0.01)
+                mouse1release()
+            end
+        end
+
+        ArsenalRunService.RenderStepped:Connect(function()
+            ArsenalFOV.Visible = true
+            ArsenalFOV.Radius = getgenv().arsenal_settings.fov
+            ArsenalFOV.Position = ArsenalUserInput:GetMouseLocation()
+        end)
+
+        ArsenalRunService:BindToRenderStep("Arsenal_Aimbot", Enum.RenderPriority.Last.Value + 1, updateArsenalAim)
+
+        ArsenalUserInput.InputBegan:Connect(function(input, gp)
+            if gp then return end
+            if input.KeyCode == getgenv().arsenal_settings.toggle_key then
+                getgenv().arsenal_settings.enabled = not getgenv().arsenal_settings.enabled
+                local status = getgenv().arsenal_settings.enabled and "ON" or "OFF"
+                game.StarterGui:SetCore("SendNotification", {
+                    Title = "Arsenal Aimbot",
+                    Text = "Aimbot: " .. status,
+                    Duration = 2
+                })
+            end
+        end)
+
+        game.StarterGui:SetCore("SendNotification", {
+            Title = "Arsenal Aimbot",
+            Text = "Loaded! Press E to toggle",
+            Duration = 3
+        })
+    end)
+    
+    if success then
+        print("[Games Scripts] Arsenal Aimbot loaded successfully!")
+    else
+        warn("[Games Scripts] Failed to load Arsenal Aimbot:", err)
+    end
+end)
+
+table.insert(panels, pGamesScripts)
 
 -- Создаем тестовые конфиги
 -- 6. CHAT PANEL (простой чат в левом нижнем углу)
