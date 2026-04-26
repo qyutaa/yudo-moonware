@@ -5,11 +5,6 @@ if not getgenv then
     getgenv = function() return _G end
 end
 
--- Глобальное хранилище для Game Scripts connections
-if not getgenv().game_scripts_connections then
-    getgenv().game_scripts_connections = {}
-end
-
 getgenv().aim_settings = {
     enabled = false,
     fov = 150,
@@ -51,11 +46,13 @@ getgenv().aim_settings = {
     jump_circle_enabled = false,
     jump_circle_speed = 0.5,
     jump_circle_size = 2.0,
+    jump_circle_color = Color3.fromRGB(0, 170, 255), -- Цвет Jump Circle
     clickgui_enabled = true,
     clickgui_blur = true,
     clickgui_darken = true,
     clickgui_image = true,
     clickgui_image_mode = "Vanilla",
+    clickgui_animation = "First", -- Режим анимации: "First" или "Two"
     trollface_animate = false,
     trollface_music = false,
     trollface_volume = 0.5,
@@ -63,6 +60,9 @@ getgenv().aim_settings = {
     cosmetic_enabled = false,
     hide_in_first_person = true,
     china_hat_friends = false,
+    trails_enabled = false, -- Trails за персонажем
+    trails_color = Color3.fromRGB(0, 170, 255),
+    trails_lifetime = 2, -- Время жизни трейла в секундах
     clickgui_bind = Enum.KeyCode.RightControl,
     hotkeys = {},
     friends = {},
@@ -75,6 +75,8 @@ getgenv().aim_settings = {
     hitboxes_color = Color3.fromRGB(0, 170, 255),
     -- Chat settings
     chat_enabled = false,
+    -- Misc settings
+    anti_fling = false, -- AntiFling - убирает коллизию с игроками
     -- Config settings
     config_manager_open = false,
     config_name = "",
@@ -83,42 +85,182 @@ getgenv().aim_settings = {
     -- TP Walk settings
     tp_walk_enabled = false,
     tp_walk_speed = 5,
+    -- Infinite Jump settings
+    infinite_jump_enabled = false,
+    infinite_jump_mode = "Default", -- "Default" или "Platform"
+    infinite_jump_power = 50, -- Сила прыжка: 10-100 (чем больше, тем выше прыжок)
+    infinite_jump_bypass = false, -- Обход античита: использует Velocity вместо ChangeState
+    infinite_jump_fall_limit = 80, -- Ограничение скорости падения (для обхода детекта)
     -- Freecam settings
     freecam_enabled = false,
     freecam_speed = 1,
 }
 
--- [[ SERVICES ]]
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local HttpService = game:GetService("HttpService")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+-- [[ SERVICES & GLOBALS ]]
+local G = {
+    TS = game:GetService("TweenService"),
+    UIS = game:GetService("UserInputService"),
+    RS = game:GetService("RunService"),
+    Plr = game:GetService("Players"),
+    Http = game:GetService("HttpService"),
+    Light = game:GetService("Lighting")
+}
+G.LP = G.Plr.LocalPlayer
+G.Cam = workspace.CurrentCamera
 
--- [[ UTILITY FUNCTIONS ]]
-local function tween(obj, props, time)
-    local tw = TweenService:Create(obj, TweenInfo.new(time or 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), props)
-    tw:Play()
-    return tw
+-- Utility
+local function tw(o, p, t) return G.TS:Create(o, TweenInfo.new(t or 0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), p):Play() end
+
+-- [[ GLOBAL STATE ]]
+local State = {
+    LockedTarget = nil,
+    lastAimbotCFrame = nil,
+    chinaHat = nil,
+    chinaHatLayers = {},
+    lastCameraMode = nil,
+    friendsHats = {},
+    trails = {}, -- Хранение трейлов для персонажа
+    originalCanCollide = {}, -- Хранение оригинальных значений CanCollide для AntiFling
+    uiRefreshers = {},
+    lastClientColor = nil,
+    panels = {},
+    messagesCache = {},
+    lastFetchTime = 0,
+    targetRotation = 0,
+    rotationDirection = 1,
+    jumpCircles = {},
+    lastJumpState = {},
+    keybindItems = {}
+}
+
+-- Utility function (нужна для IJ)
+local function getClientColor() return getgenv().aim_settings.client_color end
+
+-- Infinite Jump State
+local IJ = {c = nil, p = nil, pc = nil}
+
+-- Infinite Jump Functions (определяем рано чтобы использовать в основном цикле)
+local function IJ_CP()
+    if IJ.p then pcall(function() IJ.p:Destroy() end) IJ.p = nil end
+    if IJ.pc then pcall(function() IJ.pc:Disconnect() end) IJ.pc = nil end
+    if IJ.fsl then pcall(function() IJ.fsl:Disconnect() end) IJ.fsl = nil end
 end
 
--- [[ AIMBOT VARIABLES ]]
-local LockedTarget = nil
+local function IJ_MkP(ch)
+    IJ_CP()
+    local h = ch:FindFirstChild("HumanoidRootPart")
+    if not h then return end
+    
+    local p = Instance.new("Part")
+    p.Name = "IJP"
+    p.Size = Vector3.new(8, 0.5, 8)
+    p.Anchored = true
+    -- CanCollide зависит от режима Bypass
+    p.CanCollide = not getgenv().aim_settings.infinite_jump_bypass
+    p.Transparency = 1 -- Полностью невидимая
+    p.Material = Enum.Material.ForceField
+    p.Color = Color3.fromRGB(255, 255, 255)
+    p.CastShadow = false
+    p.Parent = workspace
+    
+    IJ.p = p
+    
+    IJ.pc = G.RS.Heartbeat:Connect(function()
+        if not (IJ.p and ch and h) then IJ_CP() return end
+        local hm = ch:FindFirstChildOfClass("Humanoid")
+        if hm then
+            local s = hm:GetState()
+            if s == Enum.HumanoidStateType.Freefall or s == Enum.HumanoidStateType.Jumping then
+                p.Position = h.Position - Vector3.new(0, 4, 0)
+            else
+                p.Position = h.Position - Vector3.new(0, 100, 0)
+            end
+        end
+    end)
+end
+
+local function IJ_I()
+    if IJ.c then IJ.c:Disconnect() IJ.c = nil end
+    IJ_CP()
+    
+    if not getgenv().aim_settings.infinite_jump_enabled then return end
+    
+    local ch = G.LP.Character
+    if not ch then return end
+    local hm = ch:FindFirstChildOfClass("Humanoid")
+    if not hm then return end
+    
+    if getgenv().aim_settings.infinite_jump_mode == "Platform" then
+        IJ_MkP(ch)
+    end
+    
+    -- Применяем силу прыжка
+    local jumpPower = getgenv().aim_settings.infinite_jump_power
+    if hm.UseJumpPower then
+        hm.JumpPower = jumpPower
+    else
+        hm.JumpHeight = jumpPower / 10 -- Конвертируем для новой системы
+    end
+    
+    -- Ограничение скорости падения для обхода детекта
+    local needLimiter = getgenv().aim_settings.infinite_jump_bypass or getgenv().aim_settings.infinite_jump_mode == "Platform"
+    
+    if needLimiter then
+        IJ.fsl = G.RS.Heartbeat:Connect(function()
+            if not (ch and ch.Parent) then
+                if IJ.fsl then IJ.fsl:Disconnect() IJ.fsl = nil end
+                return
+            end
+            
+            local hrp = ch:FindFirstChild("HumanoidRootPart")
+            local maxFallSpeed = -getgenv().aim_settings.infinite_jump_fall_limit
+            if hrp and hrp.Velocity.Y < maxFallSpeed then
+                -- Ограничиваем скорость падения
+                hrp.Velocity = Vector3.new(hrp.Velocity.X, maxFallSpeed, hrp.Velocity.Z)
+            end
+        end)
+    end
+    
+    IJ.c = G.UIS.JumpRequest:Connect(function()
+        if not getgenv().aim_settings.infinite_jump_enabled then return end
+        if not (ch and hm and hm.Parent) then return end
+        
+        local m = getgenv().aim_settings.infinite_jump_mode
+        local bypass = getgenv().aim_settings.infinite_jump_bypass
+        
+        if m == "Default" then
+            if bypass then
+                -- Обход античита: используем Velocity вместо ChangeState
+                local hrp = ch:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.Velocity = Vector3.new(hrp.Velocity.X, jumpPower, hrp.Velocity.Z)
+                end
+            else
+                hm:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        elseif m == "Platform" and IJ.p then
+            if bypass then
+                local hrp = ch:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    hrp.Velocity = Vector3.new(hrp.Velocity.X, jumpPower, hrp.Velocity.Z)
+                end
+            else
+                hm:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end)
+    
+    hm.Died:Connect(function()
+        IJ_CP()
+        if fallSpeedLimiter then fallSpeedLimiter:Disconnect() end
+    end)
+
+end
+
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 2
 FOVCircle.Transparency = 1
 FOVCircle.Visible = true
-local lastAimbotCFrame = nil
-
--- [[ CHINA HAT VARIABLES ]]
-local chinaHat = nil
-local chinaHatGradientLayers = {}
-local lastCameraMode = nil -- Для стабилизации переключений
-local friendsChinaHats = {} -- Хранит China Hat для друзей
-
--- [[ HITBOXES VARIABLES ]] - Удалены, новая система не требует хранения
 
 -- [[ COLORS & THEME ]]
 local THEME = {
@@ -134,18 +276,24 @@ local THEME = {
     BIND_BG = Color3.fromRGB(22, 22, 28),
 }
 
--- Функция для получения актуального цвета клиента
-local function getClientColor()
-    return getgenv().aim_settings.client_color
-end
-
--- Переменная для отслеживания последнего цвета клиента
-local lastClientColor = getClientColor()
-local uiRefreshers = {}
-local targetHudStroke, targetHudGlow, TargetHudAccent, avatarStroke, TargetMetaLabel
+-- UI Elements (объединены для экономии локальных переменных)
+local UI = {
+    targetHudStroke = nil,
+    targetHudGlow = nil,
+    TargetHudAccent = nil,
+    avatarStroke = nil,
+    TargetMetaLabel = nil,
+    HPBarGradient = nil,
+    ChatSendBtn = nil,
+    ScreenGui = nil,
+    HudScreenGui = nil,
+    DarkenScreenGui = nil,
+    BlurEffect = nil,
+    ClickGuiImage = nil
+}
 
 local function registerUIRefresher(callback)
-    table.insert(uiRefreshers, callback)
+    table.insert(State.uiRefreshers, callback)
     return callback
 end
 
@@ -190,7 +338,7 @@ end
 
 local function getHeadshotImage(userId)
     local ok, content = pcall(function()
-        return Players:GetUserThumbnailAsync(
+        return G.Plr:GetUserThumbnailAsync(
             userId,
             Enum.ThumbnailType.HeadShot,
             Enum.ThumbnailSize.Size420x420
@@ -205,7 +353,7 @@ local function getHeadshotImage(userId)
 end
 
 local function refreshUIFromSettings()
-    for _, refresher in ipairs(uiRefreshers) do
+    for _, refresher in ipairs(State.uiRefreshers) do
         refresher()
     end
 end
@@ -216,7 +364,7 @@ local function updateAllColors()
     refreshUIFromSettings()
     
     -- Обновляем цвета модулей
-    for _, panel in ipairs(panels or {}) do
+    for _, panel in ipairs(State.panels or {}) do
         for _, module in ipairs(panel.modules or {}) do
             if getgenv().aim_settings[module.settingKey] then
                 module.btn.BackgroundColor3 = clientColor
@@ -241,11 +389,11 @@ local function updateAllColors()
     end
     
     -- Обновляем China Hat цвета
-    if chinaHat then
-        chinaHat.Color = clientColor
+    if State.chinaHat then
+        State.chinaHat.Color = clientColor
     end
     
-    for _, hatData in pairs(friendsChinaHats or {}) do
+    for _, hatData in pairs(State.friendsHats or {}) do
         if hatData.hat then
             hatData.hat.Color = clientColor
         end
@@ -271,7 +419,7 @@ local function updateAllColors()
     end
     
     -- Обновляем градиентные слои локального China Hat
-    for i, layer in ipairs(chinaHatGradientLayers or {}) do
+    for i, layer in ipairs(State.chinaHatLayers or {}) do
         if layer then
             if i == 1 then
                 layer.Color = Color3.new(
@@ -302,6 +450,19 @@ local function updateAllColors()
         ChatSendBtn.BackgroundColor3 = clientColor
     end
     
+    -- Обновляем цвет платформы Infinite Jump
+    if IJ and IJ.p then
+        IJ.p.Color = clientColor
+        local light = IJ.p:FindFirstChildOfClass("PointLight")
+        if light then
+            light.Color = clientColor
+        end
+        local particles = IJ.p:FindFirstChildOfClass("ParticleEmitter")
+        if particles then
+            particles.Color = ColorSequence.new(clientColor)
+        end
+    end
+    
     -- Обновляем последний цвет
     lastClientColor = clientColor
 end
@@ -311,8 +472,7 @@ local ICONS = {
     Movement = "rbxassetid://10709768538",
     Visuals = "rbxassetid://10723346959",
     Misc = "rbxassetid://10709810948",
-    Config = "rbxassetid://10723374641",
-    ["Games Scripts"] = "rbxassetid://10747372992"
+    Config = "rbxassetid://10723374641"
 }
 
 -- [[ GUI CREATION ]]
@@ -323,7 +483,7 @@ ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder = 100 -- Высокий приоритет отображения
 
 -- Background Blur Effect
-local BlurEffect = Instance.new("BlurEffect", game:GetService("Lighting"))
+local BlurEffect = Instance.new("BlurEffect", G.Light)
 BlurEffect.Name = "ClickGuiBlur"
 BlurEffect.Size = 0
 BlurEffect.Enabled = false
@@ -438,9 +598,7 @@ local function fetchMessages()
     
     if response then
         local success, data = pcall(function()
-            -- Используем HttpService только для JSON декодирования
-            local HttpService = game:GetService("HttpService")
-            return HttpService:JSONDecode(response)
+            return G.Http:JSONDecode(response)
         end)
         
         if success and data and data.record and data.record.messages then
@@ -466,8 +624,8 @@ local function sendMessage(message)
     
     -- Добавляем новое сообщение
     local newMessage = {
-        userid = LocalPlayer.UserId,
-        username = LocalPlayer.Name,
+        userid = G.LP.UserId,
+        username = G.LP.Name,
         message = message,
         timestamp = os.time(),
         chat = "global"
@@ -499,9 +657,7 @@ local function sendMessage(message)
     }
     
     local url = JSONBIN_CONFIG.baseUrl .. JSONBIN_CONFIG.binId
-    -- Используем HttpService только для JSON кодирования
-    local HttpService = game:GetService("HttpService")
-    local body = HttpService:JSONEncode(data)
+    local body = G.Http:JSONEncode(data)
     
     local success = pcall(function()
         makeHttpRequest("PUT", url, headers, body)
@@ -604,7 +760,7 @@ NickLabel.Font = Enum.Font.GothamBold
 NickLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 NickLabel.BackgroundTransparency = 1
 NickLabel.Size = UDim2.new(0, 0, 1, 0)
-NickLabel.Text = LocalPlayer.Name
+NickLabel.Text = G.LP.Name
 NickLabel.AutomaticSize = Enum.AutomaticSize.X
 NickLabel.Name = "Nick"
 NickLabel.LayoutOrder = 3
@@ -849,7 +1005,7 @@ TargetHudFrame.InputBegan:Connect(function(input)
     local guiVisible = (panelAnimationState == "showing" or panelAnimationState == "visible")
     if input.UserInputType == Enum.UserInputType.MouseButton1 and guiVisible then
         targetHudDragging = true
-        local mousePos = UserInputService:GetMouseLocation()
+        local mousePos = G.UIS:GetMouseLocation()
         targetHudDragStart = Vector2.new(mousePos.X, mousePos.Y)
         targetHudStartPos = TargetHudFrame.Position
     end
@@ -865,15 +1021,17 @@ ArrowsContainer.Visible = false
 local animationStep = 60
 local targetAnimationStep = 60
 
--- Сохраняем оригинальные настройки освещения
-local Lighting = game:GetService("Lighting")
-local originalLighting = {
-    Brightness = Lighting.Brightness,
-    ClockTime = Lighting.ClockTime,
-    FogEnd = Lighting.FogEnd,
-    GlobalShadows = Lighting.GlobalShadows,
-    OutdoorAmbient = Lighting.OutdoorAmbient
-}
+-- Сохраняем оригинальные настройки освещения (с проверкой)
+local originalLighting = {}
+pcall(function()
+    originalLighting = {
+        Brightness = G.Light.Brightness,
+        ClockTime = G.Light.ClockTime,
+        FogEnd = G.Light.FogEnd,
+        GlobalShadows = G.Light.GlobalShadows,
+        OutdoorAmbient = G.Light.OutdoorAmbient
+    }
+end)
 
 -- Флаги для отслеживания состояния (чтобы не применять каждый кадр)
 local fullbrightActive = false
@@ -896,7 +1054,7 @@ local function createChinaHat(playerName, isLocalPlayer)
     
     -- Основная часть China Hat
     hatData.hat = Instance.new("Part")
-    hatData.hat.Name = isLocalPlayer and "ChinaHat" or ("ChinaHat_" .. playerName)
+    hatData.hat.Name = isLocalPlayer and "State.chinaHat" or ("ChinaHat_" .. playerName)
     hatData.hat.Size = Vector3.new(3.5, 0.8, 3.5)
     hatData.hat.Shape = Enum.PartType.Block
     hatData.hat.Material = Enum.Material.ForceField
@@ -1050,6 +1208,7 @@ local MODULE_NAMES = {
     unload_script = "Unload Script",
     hitboxes_enabled = "Hitboxes",
     tp_walk_enabled = "TP Walk",
+    infinite_jump_enabled = "Infinite Jump",
     freecam_enabled = "Freecam"
 }
 
@@ -1121,13 +1280,13 @@ local function toggleFriend(playerName)
 end
 
 local function getPlayerFromMouse()
-    local mouse = LocalPlayer:GetMouse()
+    local mouse = G.LP:GetMouse()
     local target = mouse.Target
     
     if target and target.Parent then
         local character = target.Parent
-        local player = Players:GetPlayerFromCharacter(character)
-        if player and player ~= LocalPlayer then
+        local player = G.Plr:GetPlayerFromCharacter(character)
+        if player and player ~= G.LP then
             return player
         end
     end
@@ -1146,19 +1305,19 @@ local function hasLineOfSight(targetPart)
     
     local raycastParams = RaycastParams.new()
     raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-    local ignoreList = {Camera}
-    if LocalPlayer.Character then
-        table.insert(ignoreList, LocalPlayer.Character)
+    local ignoreList = {G.Cam}
+    if G.LP.Character then
+        table.insert(ignoreList, G.LP.Character)
     end
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and isFriend(player.Name) then
+    for _, player in ipairs(G.Plr:GetPlayers()) do
+        if player ~= G.LP and player.Character and isFriend(player.Name) then
             table.insert(ignoreList, player.Character)
         end
     end
     raycastParams.FilterDescendantsInstances = ignoreList
     raycastParams.IgnoreWater = true
     
-    local origin = Camera.CFrame.Position
+    local origin = G.Cam.CFrame.Position
     local direction = targetPart.Position - origin
     local result = workspace:Raycast(origin, direction, raycastParams)
     
@@ -1168,10 +1327,10 @@ end
 local function getClosest()
     local target = nil
     local bestValue = math.huge
-    local mousePos = UserInputService:GetMouseLocation()
+    local mousePos = G.UIS:GetMouseLocation()
     
-    for _, v in pairs(Players:GetPlayers()) do
-        if v ~= LocalPlayer and v.Character then
+    for _, v in pairs(G.Plr:GetPlayers()) do
+        if v ~= G.LP and v.Character then
             -- Пропускаем друзей
             if isFriend(v.Name) then
                 continue
@@ -1191,7 +1350,7 @@ local function getClosest()
                 end
                 
                 if part then
-                    local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    local pos, onScreen = G.Cam:WorldToViewportPoint(part.Position)
                     if onScreen and pos.Z > 0 and hasLineOfSight(part) then
                         local distToCursor = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
                         -- Проверяем, находится ли игрок в FOV круге
@@ -1207,7 +1366,7 @@ local function getClosest()
                                 compareValue = hum.Health
                             else
                                 -- Distance - расстояние от игрока до цели в мире (3D)
-                                local distToPlayer = (part.Position - Camera.CFrame.Position).Magnitude
+                                local distToPlayer = (part.Position - G.Cam.CFrame.Position).Magnitude
                                 compareValue = distToPlayer
                             end
                             
@@ -1282,7 +1441,7 @@ local function updateTPWalk()
     end
     
     -- Создаем новое подключение
-    tpwalkConnection = RunService.Heartbeat:Connect(function(delta)
+    tpwalkConnection = G.RS.Heartbeat:Connect(function(delta)
         if not getgenv().aim_settings.tp_walk_enabled then
             if tpwalkConnection then
                 tpwalkConnection:Disconnect()
@@ -1291,7 +1450,7 @@ local function updateTPWalk()
             return
         end
         
-        local character = LocalPlayer.Character
+        local character = G.LP.Character
         local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
         
         if not (character and humanoid and humanoid.Parent) then
@@ -1304,14 +1463,14 @@ local function updateTPWalk()
             
             if hrp then
                 -- Сохраняем текущую позицию камеры относительно персонажа
-                local cameraCFrame = Camera.CFrame
+                local cameraCFrame = G.Cam.CFrame
                 local cameraOffset = cameraCFrame.Position - hrp.Position
                 
                 -- Двигаем персонажа
                 character:TranslateBy(humanoid.MoveDirection * speed * delta * 10)
                 
                 -- Обновляем камеру чтобы она следовала за персонажем плавно
-                Camera.CFrame = CFrame.new(hrp.Position + cameraOffset, hrp.Position + cameraOffset + cameraCFrame.LookVector)
+                G.Cam.CFrame = CFrame.new(hrp.Position + cameraOffset, hrp.Position + cameraOffset + cameraCFrame.LookVector)
             end
         end
     end)
@@ -1330,15 +1489,15 @@ function updateAimbotCamera()
         if activationMode == "Auto" then
             shouldAim = true
         elseif activationMode == "RMB" then
-            shouldAim = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+            shouldAim = G.UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
         elseif activationMode == "LMB" then
-            shouldAim = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+            shouldAim = G.UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
         end
     end
 
     if not shouldAim then
-        LockedTarget = nil
-        lastAimbotCFrame = nil
+        State.LockedTarget = nil
+        State.lastAimbotCFrame = nil
         return
     end
 
@@ -1347,31 +1506,31 @@ function updateAimbotCamera()
         local character = target.Parent
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if not humanoid or humanoid.Health <= 0 then return false end
-        local player = Players:GetPlayerFromCharacter(character)
+        local player = G.Plr:GetPlayerFromCharacter(character)
         if not player or isFriend(player.Name) then return false end
         if not hasLineOfSight(target) then return false end
         return true
     end
 
     if getgenv().aim_settings.lock_player then
-        if not isTargetValid(LockedTarget) then
-            LockedTarget = getClosest()
+        if not isTargetValid(State.LockedTarget) then
+            State.LockedTarget = getClosest()
         end
     else
-        LockedTarget = getClosest()
+        State.LockedTarget = getClosest()
     end
 
-    if not (LockedTarget and isTargetValid(LockedTarget)) then
-        lastAimbotCFrame = nil
+    if not (State.LockedTarget and isTargetValid(State.LockedTarget)) then
+        State.lastAimbotCFrame = nil
         return
     end
 
-    local activeCamera = workspace.CurrentCamera or Camera
+    local activeCamera = workspace.CurrentCamera or G.Cam
     if not activeCamera then
         return
     end
 
-    local targetPos = getgenv().aim_settings.prediction_enabled and getPredictedPosition(LockedTarget) or LockedTarget.Position
+    local targetPos = getgenv().aim_settings.prediction_enabled and getPredictedPosition(State.LockedTarget) or State.LockedTarget.Position
 
     if getgenv().aim_settings.noise_enabled then
         local noiseAmount = getgenv().aim_settings.noise_amount
@@ -1386,15 +1545,15 @@ function updateAimbotCamera()
         local currentPos = activeCamera.CFrame.Position
         
         -- Но направление берем из сохраненного CFrame (игнорируем движения мыши)
-        local currentLook = lastAimbotCFrame and lastAimbotCFrame.LookVector or activeCamera.CFrame.LookVector
+        local currentLook = State.lastAimbotCFrame and State.lastAimbotCFrame.LookVector or activeCamera.CFrame.LookVector
         local targetLook = (targetPos - currentPos).Unit
         
         -- Плавно интерполируем направление
         local smoothLook = currentLook:Lerp(targetLook, getgenv().aim_settings.smooth_amount)
         
         -- Создаем новый CFrame с текущей позицией и плавным направлением
-        lastAimbotCFrame = CFrame.new(currentPos, currentPos + smoothLook)
-        activeCamera.CFrame = lastAimbotCFrame
+        State.lastAimbotCFrame = CFrame.new(currentPos, currentPos + smoothLook)
+        activeCamera.CFrame = State.lastAimbotCFrame
     else
         -- Без smooth - мгновенное наведение
         activeCamera.CFrame = CFrame.new(activeCamera.CFrame.Position, targetPos)
@@ -1404,8 +1563,8 @@ end
 -- [[ HITBOXES FUNCTIONS - NEW SYSTEM ]]
 -- Функция для сброса хитбоксов головы
 local function resetHeadHitboxes()
-    for _, v in pairs(Players:GetPlayers()) do
-        if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("Head") then
+    for _, v in pairs(G.Plr:GetPlayers()) do
+        if v ~= G.LP and v.Character and v.Character:FindFirstChild("Head") then
             pcall(function()
                 local head = v.Character.Head
                 head.Size = Vector3.new(1, 1, 1)
@@ -1420,8 +1579,8 @@ end
 
 -- Функция для сброса хитбоксов тела
 local function resetBodyHitboxes()
-    for _, v in pairs(Players:GetPlayers()) do
-        if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
+    for _, v in pairs(G.Plr:GetPlayers()) do
+        if v ~= G.LP and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
             pcall(function()
                 local hrp = v.Character.HumanoidRootPart
                 hrp.Size = Vector3.new(2, 2, 1)
@@ -1445,8 +1604,8 @@ local function updateHitboxes()
     local transparency = getgenv().aim_settings.hitboxes_transparency
     local color = getgenv().aim_settings.hitboxes_color
     
-    for _, v in pairs(Players:GetPlayers()) do
-        if v ~= LocalPlayer and v.Character and not isFriend(v.Name) then
+    for _, v in pairs(G.Plr:GetPlayers()) do
+        if v ~= G.LP and v.Character and not isFriend(v.Name) then
             if partName == "Head" and v.Character:FindFirstChild("Head") then
                 pcall(function()
                     local head = v.Character.Head
@@ -1492,10 +1651,15 @@ function CategoryPanel.new(name, x, y, width)
     self.frame = Instance.new("Frame", ScreenGui)
     self.frame.Size = UDim2.new(0, width, 0, 40)
     self.frame.Position = UDim2.new(0, x, 0, y)
+    self.frame.AnchorPoint = Vector2.new(0, 0) -- Начинаем с 0, 0 для правильного позиционирования
     self.frame.BackgroundColor3 = THEME.PANEL_BG
     self.frame.BorderSizePixel = 0
     self.frame.ClipsDescendants = true
     Instance.new("UICorner", self.frame).CornerRadius = UDim.new(0, 10)
+    
+    -- UIScale для анимации Two
+    self.uiScale = Instance.new("UIScale", self.frame)
+    self.uiScale.Scale = 1
     
     local stroke = Instance.new("UIStroke", self.frame)
     stroke.Color = THEME.PANEL_STROKE
@@ -1528,7 +1692,7 @@ function CategoryPanel.new(name, x, y, width)
     -- Drag functionality
     header.MouseButton1Down:Connect(function()
         self.dragging = true
-        local mousePos = UserInputService:GetMouseLocation()
+        local mousePos = G.UIS:GetMouseLocation()
         self.dragStart = Vector2.new(mousePos.X, mousePos.Y)
         self.startPos = self.frame.Position
     end)
@@ -1558,7 +1722,7 @@ function CategoryPanel.new(name, x, y, width)
     })
     
     self.layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        tween(self.frame, {Size = UDim2.new(0, self.width, 0, self.layout.AbsoluteContentSize.Y + 10)}, 0.3)
+        tw(self.frame, {Size = UDim2.new(0, self.width, 0, self.layout.AbsoluteContentSize.Y + 10)}, 0.3)
     end)
     
     return self
@@ -1566,7 +1730,7 @@ end
 
 function CategoryPanel:update()
     if self.dragging then
-        local mouse = UserInputService:GetMouseLocation()
+        local mouse = G.UIS:GetMouseLocation()
         local delta = Vector2.new(mouse.X - self.dragStart.X, mouse.Y - self.dragStart.Y)
         self.frame.Position = UDim2.new(
             0,
@@ -1596,10 +1760,16 @@ function CategoryPanel:addModule(moduleName, settingKey, hasSettings)
     
     local btn = Instance.new("TextButton", container)
     btn.Size = UDim2.new(1, 0, 0, 34)
+    btn.Position = UDim2.new(0.5, 0, 0, 0) -- Центрируем для AnchorPoint
+    btn.AnchorPoint = Vector2.new(0.5, 0) -- AnchorPoint для масштабирования от центра
     btn.BackgroundColor3 = getgenv().aim_settings[settingKey] and getClientColor() or THEME.MODULE_BG
     btn.AutoButtonColor = false
     btn.Text = ""
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    -- UIScale для hover эффекта
+    local btnScale = Instance.new("UIScale", btn)
+    btnScale.Scale = 1
     
     local btnStroke = Instance.new("UIStroke", btn)
     btnStroke.Color = THEME.MODULE_STROKE
@@ -1661,6 +1831,26 @@ function CategoryPanel:addModule(moduleName, settingKey, hasSettings)
         arrowLbl.TextSize = 12
     end
     
+    -- Hover эффект
+    local targetScale = 1
+    local currentScale = 1
+    
+    btn.MouseEnter:Connect(function()
+        targetScale = 1.03 -- Увеличение на 3%
+    end)
+    
+    btn.MouseLeave:Connect(function()
+        targetScale = 1
+    end)
+    
+    -- Плавная анимация scale
+    G.RS.RenderStepped:Connect(function()
+        if math.abs(currentScale - targetScale) > 0.001 then
+            currentScale = currentScale + (targetScale - currentScale) * 0.2 -- Плавность
+            btnScale.Scale = currentScale
+        end
+    end)
+    
     local settingsList = Instance.new("Frame", container)
     settingsList.Size = UDim2.new(1, 0, 1, -34)
     settingsList.Position = UDim2.new(0, 0, 0, 34)
@@ -1695,18 +1885,18 @@ function CategoryPanel:addModule(moduleName, settingKey, hasSettings)
     btn.MouseButton1Click:Connect(function()
         local state = not getgenv().aim_settings[settingKey]
         getgenv().aim_settings[settingKey] = state
-        tween(btn, {BackgroundColor3 = state and getClientColor() or THEME.MODULE_BG}, 0.2)
+        tw(btn, {BackgroundColor3 = state and getClientColor() or THEME.MODULE_BG}, 0.2)
     end)
     
     btn.MouseButton2Click:Connect(function()
         if not hasSettings then return end
         moduleData.expanded = not moduleData.expanded
         if moduleData.expanded then
-            tween(arrowLbl, {Rotation = 90}, 0.2)
-            tween(container, {Size = UDim2.new(1, -16, 0, 34 + setListLayout.AbsoluteContentSize.Y)}, 0.3)
+            tw(arrowLbl, {Rotation = 90}, 0.2)
+            tw(container, {Size = UDim2.new(1, -16, 0, 34 + setListLayout.AbsoluteContentSize.Y)}, 0.3)
         else
-            tween(arrowLbl, {Rotation = 0}, 0.2)
-            tween(container, {Size = UDim2.new(1, -16, 0, 34)}, 0.3)
+            tw(arrowLbl, {Rotation = 0}, 0.2)
+            tw(container, {Size = UDim2.new(1, -16, 0, 34)}, 0.3)
         end
     end)
     
@@ -1757,15 +1947,15 @@ function CategoryPanel:addBoolean(moduleData, name, settingKey)
         check.Text = val and "✓" or "X"
         
         if val then
-            tween(checkContainer, {BackgroundColor3 = THEME.GREEN_CHECK}, 0.3)
-            tween(check, {TextColor3 = Color3.fromRGB(255, 255, 255)}, 0.3)
+            tw(checkContainer, {BackgroundColor3 = THEME.GREEN_CHECK}, 0.3)
+            tw(check, {TextColor3 = Color3.fromRGB(255, 255, 255)}, 0.3)
             gradient.Color = ColorSequence.new({
                 ColorSequenceKeypoint.new(0, Color3.fromRGB(90, 210, 120)),
                 ColorSequenceKeypoint.new(1, Color3.fromRGB(60, 180, 90))
             })
         else
-            tween(checkContainer, {BackgroundColor3 = THEME.RED_CROSS}, 0.3)
-            tween(check, {TextColor3 = Color3.fromRGB(255, 255, 255)}, 0.3)
+            tw(checkContainer, {BackgroundColor3 = THEME.RED_CROSS}, 0.3)
+            tw(check, {TextColor3 = Color3.fromRGB(255, 255, 255)}, 0.3)
             gradient.Color = ColorSequence.new({
                 ColorSequenceKeypoint.new(0, THEME.RED_CROSS),
                 ColorSequenceKeypoint.new(1, getClientColor())
@@ -2030,7 +2220,7 @@ function CategoryPanel:addColorPicker(moduleData, name, settingKey)
         pickerArea.MouseButton1Down:Connect(function()
             draggingPicker = true
             -- Немедленно обновляем позицию при клике
-            local mouse = UserInputService:GetMouseLocation()
+            local mouse = G.UIS:GetMouseLocation()
             local pos = pickerArea.AbsolutePosition
             local size = pickerArea.AbsoluteSize
             
@@ -2047,7 +2237,7 @@ function CategoryPanel:addColorPicker(moduleData, name, settingKey)
         hueSlider.MouseButton1Down:Connect(function()
             draggingHue = true
             -- Немедленно обновляем позицию при клике
-            local mouse = UserInputService:GetMouseLocation()
+            local mouse = G.UIS:GetMouseLocation()
             local pos = hueSlider.AbsolutePosition
             local size = hueSlider.AbsoluteSize
             
@@ -2058,10 +2248,10 @@ function CategoryPanel:addColorPicker(moduleData, name, settingKey)
             updatePickerColor()
         end)
         
-        UserInputService.InputChanged:Connect(function(input)
+        G.UIS.InputChanged:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseMovement then
                 if draggingPicker then
-                    local mouse = UserInputService:GetMouseLocation()
+                    local mouse = G.UIS:GetMouseLocation()
                     local pos = pickerArea.AbsolutePosition
                     local size = pickerArea.AbsoluteSize
                     
@@ -2076,7 +2266,7 @@ function CategoryPanel:addColorPicker(moduleData, name, settingKey)
                 end
                 
                 if draggingHue then
-                    local mouse = UserInputService:GetMouseLocation()
+                    local mouse = G.UIS:GetMouseLocation()
                     local pos = hueSlider.AbsolutePosition
                     local size = hueSlider.AbsoluteSize
                     
@@ -2089,7 +2279,7 @@ function CategoryPanel:addColorPicker(moduleData, name, settingKey)
             end
         end)
         
-        UserInputService.InputEnded:Connect(function(input)
+        G.UIS.InputEnded:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 draggingPicker = false
                 draggingHue = false
@@ -2161,7 +2351,7 @@ function CategoryPanel:addSlider(moduleData, name, settingKey, min, max, inc)
     local function applySliderValue(value)
         getgenv().aim_settings[settingKey] = value
         valLbl.Text = string.format("%.2f", value)
-        tween(fill, {Size = UDim2.new(math.clamp((value - min) / (max - min), 0, 1), 0, 1, 0)}, 0.1)
+        tw(fill, {Size = UDim2.new(math.clamp((value - min) / (max - min), 0, 1), 0, 1, 0)}, 0.1)
     end
 
     local function updateSlider(input)
@@ -2177,11 +2367,11 @@ function CategoryPanel:addSlider(moduleData, name, settingKey, min, max, inc)
         end
     end)
     
-    UserInputService.InputEnded:Connect(function(input)
+    G.UIS.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
     end)
     
-    UserInputService.InputChanged:Connect(function(input)
+    G.UIS.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then updateSlider(input) end
     end)
 
@@ -2347,9 +2537,9 @@ function CategoryPanel:addButton(name, callback)
     btnStroke.Thickness = 1
     
     btn.MouseButton1Click:Connect(function()
-        tween(btn, {BackgroundColor3 = getClientColor()}, 0.1)
+        tw(btn, {BackgroundColor3 = getClientColor()}, 0.1)
         wait(0.1)
-        tween(btn, {BackgroundColor3 = THEME.MODULE_BG}, 0.1)
+        tw(btn, {BackgroundColor3 = THEME.MODULE_BG}, 0.1)
         if callback then
             callback()
         end
@@ -2365,7 +2555,6 @@ function CategoryPanel:addCustomElement(element)
 end
 
 -- [[ BUILD UI ]]
-local panels = {}
 local startX = 50
 local panelW = 200
 local gap = 12
@@ -2395,6 +2584,8 @@ end
 
 -- Функция для обновления анимации панелей
 local function updatePanelAnimation(deltaTime)
+    local animationMode = getgenv().aim_settings.clickgui_animation
+    
     if panelAnimationState == "showing" then
         panelAnimationProgress = panelAnimationProgress + deltaTime * 4 -- Скорость анимации
         
@@ -2403,24 +2594,68 @@ local function updatePanelAnimation(deltaTime)
             panelAnimationState = "visible"
         end
         
-        -- Плавная анимация появления снизу с задержкой для каждой панели
-        for i, panel in ipairs(panels) do
-            local delay = (i - 1) * 0.1 -- Задержка между панелями
-            local adjustedProgress = math.max(0, math.min(1, (panelAnimationProgress - delay) / (1 - delay)))
-            
-            -- Easing функция для плавности (ease out cubic)
-            local easedProgress = 1 - math.pow(1 - adjustedProgress, 3)
-            
-            local startY = 1 + 0.1 -- Начальная позиция (ниже экрана)
-            local targetY = panelOriginalPositions[i].Y.Scale
-            local currentY = startY + (targetY - startY) * easedProgress
-            
-            panel.frame.Position = UDim2.new(
-                panelOriginalPositions[i].X.Scale,
-                panelOriginalPositions[i].X.Offset,
-                currentY,
-                panelOriginalPositions[i].Y.Offset
-            )
+        if animationMode == "First" then
+            -- Плавная анимация появления снизу с задержкой для каждой панели
+            for i, panel in ipairs(State.panels) do
+                -- Устанавливаем AnchorPoint для режима First
+                panel.frame.AnchorPoint = Vector2.new(0, 0)
+                
+                local delay = (i - 1) * 0.1 -- Задержка между панелями
+                local adjustedProgress = math.max(0, math.min(1, (panelAnimationProgress - delay) / (1 - delay)))
+                
+                -- Easing функция для плавности (ease out cubic)
+                local easedProgress = 1 - math.pow(1 - adjustedProgress, 3)
+                
+                local startY = 1 + 0.1 -- Начальная позиция (ниже экрана)
+                local targetY = panelOriginalPositions[i].Y.Scale
+                local currentY = startY + (targetY - startY) * easedProgress
+                
+                panel.frame.Position = UDim2.new(
+                    panelOriginalPositions[i].X.Scale,
+                    panelOriginalPositions[i].X.Offset,
+                    currentY,
+                    panelOriginalPositions[i].Y.Offset
+                )
+                
+                -- Сбрасываем scale и transparency для режима First
+                panel.uiScale.Scale = 1
+                panel.frame.BackgroundTransparency = 0
+            end
+        else -- animationMode == "Two"
+            -- Анимация увеличения с центра
+            for i, panel in ipairs(State.panels) do
+                -- Устанавливаем AnchorPoint для режима Two (центр)
+                panel.frame.AnchorPoint = Vector2.new(0.5, 0.5)
+                
+                local delay = (i - 1) * 0.08 -- Задержка между панелями
+                local adjustedProgress = math.max(0, math.min(1, (panelAnimationProgress - delay) / (1 - delay)))
+                
+                -- Easing функция (ease out back - небольшой overshoot)
+                local easedProgress = 1 - math.pow(1 - adjustedProgress, 3)
+                
+                -- Начинаем с 0, увеличиваемся до 1.1, затем до 1
+                local scale
+                if easedProgress < 0.5 then
+                    -- Первая половина: 0 -> 1.1
+                    scale = easedProgress * 2 * 1.1
+                else
+                    -- Вторая половина: 1.1 -> 1
+                    local secondHalf = (easedProgress - 0.5) * 2
+                    scale = 1.1 - secondHalf * 0.1
+                end
+                
+                panel.uiScale.Scale = scale
+                panel.frame.BackgroundTransparency = math.max(0, 1 - easedProgress * 2)
+                
+                -- Используем оригинальную позицию и просто добавляем половину размера
+                -- Не используем AbsoluteSize чтобы избежать дёргания
+                panel.frame.Position = UDim2.new(
+                    panelOriginalPositions[i].X.Scale,
+                    panelOriginalPositions[i].X.Offset + panel.width / 2,
+                    panelOriginalPositions[i].Y.Scale,
+                    panelOriginalPositions[i].Y.Offset
+                )
+            end
         end
         
     elseif panelAnimationState == "hiding" then
@@ -2433,24 +2668,73 @@ local function updatePanelAnimation(deltaTime)
             ScreenGui.Enabled = false
         end
         
-        -- Плавная анимация исчезновения вверх с задержкой для каждой панели
-        for i, panel in ipairs(panels) do
-            local delay = (i - 1) * 0.05 -- Меньшая задержка при скрытии
-            local adjustedProgress = math.max(0, math.min(1, (panelAnimationProgress - delay) / (1 - delay)))
-            
-            -- Easing функция для плавности (ease in cubic)
-            local easedProgress = math.pow(adjustedProgress, 3)
-            
-            local startY = panelOriginalPositions[i].Y.Scale
-            local targetY = -0.5 -- Конечная позиция (выше экрана)
-            local currentY = startY + (targetY - startY) * easedProgress
-            
-            panel.frame.Position = UDim2.new(
-                panelOriginalPositions[i].X.Scale,
-                panelOriginalPositions[i].X.Offset,
-                currentY,
-                panelOriginalPositions[i].Y.Offset
-            )
+        if animationMode == "First" then
+            -- Плавная анимация исчезновения вверх с задержкой для каждой панели
+            for i, panel in ipairs(State.panels) do
+                -- Устанавливаем AnchorPoint для режима First
+                panel.frame.AnchorPoint = Vector2.new(0, 0)
+                
+                local delay = (i - 1) * 0.05 -- Меньшая задержка при скрытии
+                local adjustedProgress = math.max(0, math.min(1, (panelAnimationProgress - delay) / (1 - delay)))
+                
+                -- Easing функция для плавности (ease in cubic)
+                local easedProgress = math.pow(adjustedProgress, 3)
+                
+                local startY = panelOriginalPositions[i].Y.Scale
+                local targetY = -0.5 -- Конечная позиция (выше экрана)
+                local currentY = startY + (targetY - startY) * easedProgress
+                
+                panel.frame.Position = UDim2.new(
+                    panelOriginalPositions[i].X.Scale,
+                    panelOriginalPositions[i].X.Offset,
+                    currentY,
+                    panelOriginalPositions[i].Y.Offset
+                )
+                
+                panel.uiScale.Scale = 1
+                panel.frame.BackgroundTransparency = 0
+            end
+        else -- animationMode == "Two"
+            -- Анимация уменьшения в центр с исчезновением
+            for i, panel in ipairs(State.panels) do
+                -- Устанавливаем AnchorPoint для режима Two (центр)
+                panel.frame.AnchorPoint = Vector2.new(0.5, 0.5)
+                
+                local delay = (i - 1) * 0.08 -- Задержка между панелями
+                local adjustedProgress = math.max(0, math.min(1, (panelAnimationProgress - delay) / (1 - delay)))
+                
+                -- Easing функция (ease in cubic)
+                local easedProgress = math.pow(adjustedProgress, 2)
+                
+                -- Сначала увеличиваемся на 10%, затем уменьшаемся до 30%
+                local scale
+                if easedProgress < 0.2 then
+                    -- Первые 20%: 1 -> 1.1
+                    scale = 1 + (easedProgress / 0.2) * 0.1
+                else
+                    -- Остальные 80%: 1.1 -> 0.3
+                    local shrinkProgress = (easedProgress - 0.2) / 0.8
+                    scale = 1.1 - shrinkProgress * 0.8
+                end
+                
+                panel.uiScale.Scale = scale
+                
+                -- Используем оригинальную позицию и просто добавляем половину размера
+                panel.frame.Position = UDim2.new(
+                    panelOriginalPositions[i].X.Scale,
+                    panelOriginalPositions[i].X.Offset + panel.width / 2,
+                    panelOriginalPositions[i].Y.Scale,
+                    panelOriginalPositions[i].Y.Offset
+                )
+                
+                -- Плавное исчезновение после уменьшения
+                if easedProgress > 0.6 then
+                    local fadeProgress = (easedProgress - 0.6) / 0.4
+                    panel.frame.BackgroundTransparency = fadeProgress
+                else
+                    panel.frame.BackgroundTransparency = 0
+                end
+            end
         end
     end
 end
@@ -2478,7 +2762,7 @@ pCombat:addSlider(mHitboxes, "Size", "hitboxes_size", 1.0, 30.0, 0.5)
 pCombat:addSlider(mHitboxes, "Transparency", "hitboxes_transparency", 0.0, 1.0, 0.05)
 pCombat:addColorPicker(mHitboxes, "Color", "hitboxes_color")
 
-table.insert(panels, pCombat)
+table.insert(State.panels, pCombat)
 
 -- 2. VISUALS
 local pVisuals = CategoryPanel.new("Visuals", startX + panelW + gap, 50, panelW)
@@ -2501,7 +2785,9 @@ pVisuals:addModule("Rainbow Crosshair", "rainbow_crosshair", false)
 local mJumpCircle = pVisuals:addModule("Jump Circle", "jump_circle_enabled", true)
 pVisuals:addSlider(mJumpCircle, "Speed", "jump_circle_speed", 0.1, 2.0, 0.1)
 pVisuals:addSlider(mJumpCircle, "Size", "jump_circle_size", 0.5, 20.0, 0.1)
+pVisuals:addColorPicker(mJumpCircle, "Color", "jump_circle_color")
 local mClickGui = pVisuals:addModule("ClickGui", "clickgui_enabled", true)
+pVisuals:addDropdown(mClickGui, "Animation", "clickgui_animation", {"First", "Two"})
 pVisuals:addBoolean(mClickGui, "Blur", "clickgui_blur")
 pVisuals:addBoolean(mClickGui, "Darken", "clickgui_darken")
 pVisuals:addBoolean(mClickGui, "Image", "clickgui_image")
@@ -2513,24 +2799,33 @@ local mCosmetic = pVisuals:addModule("Cosmetic", "cosmetic_enabled", true)
 pVisuals:addBoolean(mCosmetic, "China Hat", "china_hat")
 pVisuals:addBoolean(mCosmetic, "Hide in First Person", "hide_in_first_person")
 pVisuals:addBoolean(mCosmetic, "Friends", "china_hat_friends")
-table.insert(panels, pVisuals)
+pVisuals:addBoolean(mCosmetic, "Trails", "trails_enabled")
+pVisuals:addColorPicker(mCosmetic, "Trails Color", "trails_color")
+pVisuals:addSlider(mCosmetic, "Trails Lifetime", "trails_lifetime", 0.5, 5, 0.5)
+table.insert(State.panels, pVisuals)
 
 -- 3. MOVEMENT
 local pMove = CategoryPanel.new("Movement", startX + (panelW + gap)*2, 50, panelW)
 local mTPWalk = pMove:addModule("TP Walk", "tp_walk_enabled", true)
 pMove:addSlider(mTPWalk, "Speed", "tp_walk_speed", 1, 10, 0.5)
+local mInfJump = pMove:addModule("Infinite Jump", "infinite_jump_enabled", true)
+pMove:addDropdown(mInfJump, "Mode", "infinite_jump_mode", {"Default", "Platform"})
+pMove:addSlider(mInfJump, "Jump Power", "infinite_jump_power", 10, 100, 1)
+pMove:addBoolean(mInfJump, "Bypass AntiCheat", "infinite_jump_bypass")
+pMove:addSlider(mInfJump, "Fall Speed Limit", "infinite_jump_fall_limit", 40, 120, 1)
 local mFreecam = pMove:addModule("Freecam", "freecam_enabled", true)
 pMove:addSlider(mFreecam, "Speed", "freecam_speed", 0.1, 5, 0.1)
-table.insert(panels, pMove)
+table.insert(State.panels, pMove)
 
 -- 4. MISC
 local pMisc = CategoryPanel.new("Misc", startX + (panelW + gap)*3, 50, panelW)
 local mClickAction = pMisc:addModule("Friend Add/Rem", "click_action", false)
+pMisc:addModule("AntiFling", "anti_fling", false)
 pMisc:addModule("FullBright", "fullbright", false)
 pMisc:addModule("Always Day", "always_day", false)
 pMisc:addModule("Chat", "chat_enabled", false)
 local mUnload = pMisc:addModule("Unload Script", "unload_script", false)
-table.insert(panels, pMisc)
+table.insert(State.panels, pMisc)
 
 -- 5. CONFIG
 local pConfig = CategoryPanel.new("Config", startX + (panelW + gap)*4, 50, panelW)
@@ -2644,7 +2939,7 @@ local function reloadConfigsFromDisk()
             local readOk, raw = pcall(readfile, path)
             if readOk and type(raw) == "string" and raw ~= "" then
                 local decodeOk, payload = pcall(function()
-                    return HttpService:JSONDecode(raw)
+                    return G.Http:JSONDecode(raw)
                 end)
                 
                 if decodeOk and type(payload) == "table" then
@@ -2798,7 +3093,7 @@ reloadConfigsFromDisk = function()
             local readOk, raw = pcall(readfile, path)
             if readOk and type(raw) == "string" and raw ~= "" then
                 local decodeOk, payload = pcall(function()
-                    return HttpService:JSONDecode(raw)
+                    return G.Http:JSONDecode(raw)
                 end)
                 
                 if decodeOk and type(payload) == "table" then
@@ -2829,7 +3124,7 @@ saveConfig = function(name)
     local timestamp = os.time()
     local filePath = getConfigFilePath(encodedName)
     local writeOk, writeErr = pcall(function()
-        writefile(filePath, HttpService:JSONEncode({
+        writefile(filePath, G.Http:JSONEncode({
             name = name,
             timestamp = timestamp,
             data = serializedData
@@ -3060,299 +3355,7 @@ pConfig:addButton("Refresh List", function()
     updateConfigList()
 end)
 
-table.insert(panels, pConfig)
-
--- 6. GAMES SCRIPTS
-local pGamesScripts = CategoryPanel.new("Games Scripts", startX + (panelW + gap)*5, 50, panelW)
-
--- Ohio Aimbot button
-pGamesScripts:addButton("Ohio Aimbot", function()
-    local success, err = pcall(function()
-        -- Очищаем старые connections если есть
-        if getgenv().game_scripts_connections.ohio then
-            for _, conn in pairs(getgenv().game_scripts_connections.ohio) do
-                pcall(function() conn:Disconnect() end)
-            end
-            getgenv().game_scripts_connections.ohio = nil
-        end
-        
-        -- Ohio Aimbot встроенный код
-        if not getgenv then
-            getgenv = function() return _G end
-        end
-
-        getgenv().ohio_settings = {
-            enabled = false,
-            fov = 150,
-            smooth = true,
-            smooth_amount = 0.15,
-            prediction = true,
-            prediction_amount = 0.12,
-            toggle_key = Enum.KeyCode.Q,
-        }
-
-        local OhioPlayers = game:GetService("Players")
-        local OhioRunService = game:GetService("RunService")
-        local OhioUserInput = game:GetService("UserInputService")
-        local OhioLocalPlayer = OhioPlayers.LocalPlayer
-        local OhioCamera = workspace.CurrentCamera
-
-        local OhioTarget = nil
-        local OhioFOV = Drawing.new("Circle")
-        OhioFOV.Thickness = 2
-        OhioFOV.Color = Color3.fromRGB(255, 255, 255)
-        OhioFOV.Transparency = 1
-        OhioFOV.Visible = true
-        OhioFOV.NumSides = 64
-
-        local function getOhioClosest()
-            local closest = nil
-            local shortestDist = getgenv().ohio_settings.fov
-            local mousePos = OhioUserInput:GetMouseLocation()
-            
-            for _, player in pairs(OhioPlayers:GetPlayers()) do
-                if player ~= OhioLocalPlayer and player.Character then
-                    local hum = player.Character:FindFirstChildOfClass("Humanoid")
-                    if hum and hum.Health > 0 then
-                        local head = player.Character:FindFirstChild("Head")
-                        if head then
-                            local screenPos, onScreen = OhioCamera:WorldToViewportPoint(head.Position)
-                            if onScreen then
-                                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                                if dist < shortestDist then
-                                    closest = head
-                                    shortestDist = dist
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            return closest
-        end
-
-        local function getOhioPredicted(part)
-            if not part or not part.Parent then
-                return part and part.Position or Vector3.new(0, 0, 0)
-            end
-            local vel = part.Velocity
-            return part.Position + (vel * getgenv().ohio_settings.prediction_amount)
-        end
-
-        local function updateOhioAim()
-            if not getgenv().ohio_settings.enabled then
-                OhioTarget = nil
-                return
-            end
-            
-            if not OhioUserInput:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-                OhioTarget = nil
-                return
-            end
-            
-            OhioTarget = getOhioClosest()
-            if not OhioTarget then return end
-            
-            local targetPos = getgenv().ohio_settings.prediction and getOhioPredicted(OhioTarget) or OhioTarget.Position
-            
-            if getgenv().ohio_settings.smooth then
-                local currentCF = OhioCamera.CFrame
-                local targetLook = (targetPos - currentCF.Position).Unit
-                local currentLook = currentCF.LookVector
-                local smoothLook = currentLook:Lerp(targetLook, getgenv().ohio_settings.smooth_amount)
-                OhioCamera.CFrame = CFrame.new(currentCF.Position, currentCF.Position + smoothLook)
-            else
-                OhioCamera.CFrame = CFrame.new(OhioCamera.CFrame.Position, targetPos)
-            end
-        end
-
-        -- Сохраняем connections
-        getgenv().game_scripts_connections.ohio = {
-            fov = OhioRunService.RenderStepped:Connect(function()
-                OhioFOV.Visible = true
-                OhioFOV.Radius = getgenv().ohio_settings.fov
-                OhioFOV.Position = OhioUserInput:GetMouseLocation()
-            end),
-            fov_circle = OhioFOV
-        }
-
-        OhioRunService:BindToRenderStep("Ohio_Aimbot", Enum.RenderPriority.Last.Value + 1, updateOhioAim)
-
-        getgenv().game_scripts_connections.ohio.input = OhioUserInput.InputBegan:Connect(function(input, gp)
-            if gp then return end
-            if input.KeyCode == getgenv().ohio_settings.toggle_key then
-                getgenv().ohio_settings.enabled = not getgenv().ohio_settings.enabled
-                local status = getgenv().ohio_settings.enabled and "ON" or "OFF"
-                game.StarterGui:SetCore("SendNotification", {
-                    Title = "Ohio Aimbot",
-                    Text = "Aimbot: " .. status,
-                    Duration = 2
-                })
-            end
-        end)
-
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "Ohio Aimbot",
-            Text = "Loaded! Press Q to toggle",
-            Duration = 3
-        })
-    end)
-    
-    if success then
-        print("[Games Scripts] Ohio Aimbot loaded successfully!")
-    else
-        warn("[Games Scripts] Failed to load Ohio Aimbot:", err)
-    end
-end)
-
--- Arsenal Aimbot button
-pGamesScripts:addButton("Arsenal Aimbot", function()
-    local success, err = pcall(function()
-        -- Очищаем старые connections если есть
-        if getgenv().game_scripts_connections.arsenal then
-            for _, conn in pairs(getgenv().game_scripts_connections.arsenal) do
-                pcall(function() conn:Disconnect() end)
-            end
-            getgenv().game_scripts_connections.arsenal = nil
-        end
-        
-        -- Arsenal Aimbot встроенный код
-        if not getgenv then
-            getgenv = function() return _G end
-        end
-
-        getgenv().arsenal_settings = {
-            enabled = false,
-            fov = 200,
-            smooth = true,
-            smooth_amount = 0.2,
-            prediction = true,
-            prediction_amount = 0.15,
-            toggle_key = Enum.KeyCode.E,
-            auto_shoot = false,
-        }
-
-        local ArsenalPlayers = game:GetService("Players")
-        local ArsenalRunService = game:GetService("RunService")
-        local ArsenalUserInput = game:GetService("UserInputService")
-        local ArsenalLocalPlayer = ArsenalPlayers.LocalPlayer
-        local ArsenalCamera = workspace.CurrentCamera
-
-        local ArsenalTarget = nil
-        local ArsenalFOV = Drawing.new("Circle")
-        ArsenalFOV.Thickness = 2
-        ArsenalFOV.Color = Color3.fromRGB(255, 100, 100)
-        ArsenalFOV.Transparency = 1
-        ArsenalFOV.Visible = true
-        ArsenalFOV.NumSides = 64
-
-        local function getArsenalClosest()
-            local closest = nil
-            local shortestDist = getgenv().arsenal_settings.fov
-            local mousePos = ArsenalUserInput:GetMouseLocation()
-            
-            for _, player in pairs(ArsenalPlayers:GetPlayers()) do
-                if player ~= ArsenalLocalPlayer and player.Character then
-                    local hum = player.Character:FindFirstChildOfClass("Humanoid")
-                    if hum and hum.Health > 0 then
-                        local torso = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
-                        if torso then
-                            local screenPos, onScreen = ArsenalCamera:WorldToViewportPoint(torso.Position)
-                            if onScreen then
-                                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                                if dist < shortestDist then
-                                    closest = torso
-                                    shortestDist = dist
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-            return closest
-        end
-
-        local function getArsenalPredicted(part)
-            if not part or not part.Parent then
-                return part and part.Position or Vector3.new(0, 0, 0)
-            end
-            local vel = part.Velocity
-            return part.Position + (vel * getgenv().arsenal_settings.prediction_amount)
-        end
-
-        local function updateArsenalAim()
-            if not getgenv().arsenal_settings.enabled then
-                ArsenalTarget = nil
-                return
-            end
-            
-            if not ArsenalUserInput:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-                ArsenalTarget = nil
-                return
-            end
-            
-            ArsenalTarget = getArsenalClosest()
-            if not ArsenalTarget then return end
-            
-            local targetPos = getgenv().arsenal_settings.prediction and getArsenalPredicted(ArsenalTarget) or ArsenalTarget.Position
-            
-            if getgenv().arsenal_settings.smooth then
-                local currentCF = ArsenalCamera.CFrame
-                local targetLook = (targetPos - currentCF.Position).Unit
-                local currentLook = currentCF.LookVector
-                local smoothLook = currentLook:Lerp(targetLook, getgenv().arsenal_settings.smooth_amount)
-                ArsenalCamera.CFrame = CFrame.new(currentCF.Position, currentCF.Position + smoothLook)
-            else
-                ArsenalCamera.CFrame = CFrame.new(ArsenalCamera.CFrame.Position, targetPos)
-            end
-            
-            if getgenv().arsenal_settings.auto_shoot and ArsenalTarget then
-                mouse1press()
-                wait(0.01)
-                mouse1release()
-            end
-        end
-
-        -- Сохраняем connections
-        getgenv().game_scripts_connections.arsenal = {
-            fov = ArsenalRunService.RenderStepped:Connect(function()
-                ArsenalFOV.Visible = true
-                ArsenalFOV.Radius = getgenv().arsenal_settings.fov
-                ArsenalFOV.Position = ArsenalUserInput:GetMouseLocation()
-            end),
-            fov_circle = ArsenalFOV
-        }
-
-        ArsenalRunService:BindToRenderStep("Arsenal_Aimbot", Enum.RenderPriority.Last.Value + 1, updateArsenalAim)
-
-        getgenv().game_scripts_connections.arsenal.input = ArsenalUserInput.InputBegan:Connect(function(input, gp)
-            if gp then return end
-            if input.KeyCode == getgenv().arsenal_settings.toggle_key then
-                getgenv().arsenal_settings.enabled = not getgenv().arsenal_settings.enabled
-                local status = getgenv().arsenal_settings.enabled and "ON" or "OFF"
-                game.StarterGui:SetCore("SendNotification", {
-                    Title = "Arsenal Aimbot",
-                    Text = "Aimbot: " .. status,
-                    Duration = 2
-                })
-            end
-        end)
-
-        game.StarterGui:SetCore("SendNotification", {
-            Title = "Arsenal Aimbot",
-            Text = "Loaded! Press E to toggle",
-            Duration = 3
-        })
-    end)
-    
-    if success then
-        print("[Games Scripts] Arsenal Aimbot loaded successfully!")
-    else
-        warn("[Games Scripts] Failed to load Arsenal Aimbot:", err)
-    end
-end)
-
-table.insert(panels, pGamesScripts)
+table.insert(State.panels, pConfig)
 
 -- Создаем тестовые конфиги
 -- 6. CHAT PANEL (простой чат в левом нижнем углу)
@@ -3539,7 +3542,7 @@ local function sendChatMessage()
     local message = ChatInput.Text:gsub("^%s*(.-)%s*$", "%1") -- Убираем пробелы
     if message ~= "" then
         -- Добавляем сообщение локально сразу
-        addChatMessage(LocalPlayer.Name, message, true, os.time())
+        addChatMessage(G.LP.Name, message, true, os.time())
         
         -- Очищаем поле ввода
         ChatInput.Text = ""
@@ -3636,7 +3639,7 @@ local function loadServerMessages()
         for _, msg in pairs(globalMessages) do
             local msgTime = msg.timestamp or 0
             if msgTime > lastMessageTime then
-                local isOwn = msg.userid == LocalPlayer.UserId
+                local isOwn = msg.userid == G.LP.UserId
                 -- Добавляем все новые сообщения (включая свои с сервера для синхронизации)
                 addChatMessage(msg.username or "Unknown", msg.message or "", isOwn, msgTime)
                 newMessagesAdded = true
@@ -3683,7 +3686,7 @@ local function loadAllMessages()
         local startIndex = math.max(1, #globalMessages - 49)
         for i = startIndex, #globalMessages do
             local msg = globalMessages[i]
-            local isOwn = msg.userid == LocalPlayer.UserId
+            local isOwn = msg.userid == G.LP.UserId
             addChatMessage(msg.username or "Unknown", msg.message or "", isOwn, msg.timestamp)
         end
         
@@ -3703,7 +3706,7 @@ spawn(function()
 end)
 
 -- Сохраняем оригинальные позиции панелей и устанавливаем начальные позиции внизу экрана
-for i, panel in ipairs(panels) do
+for i, panel in ipairs(State.panels) do
     panelOriginalPositions[i] = panel.frame.Position
     panelTargetPositions[i] = panel.frame.Position
     -- Устанавливаем панели внизу экрана (невидимые)
@@ -3742,7 +3745,7 @@ local function updateGUIVisibility()
     
     -- Show/Hide Trollface options
     local isTrollface = getgenv().aim_settings.clickgui_image_mode == "trollface"
-    for _, panel in ipairs(panels) do
+    for _, panel in ipairs(State.panels) do
         for _, module in ipairs(panel.modules) do
             local key = module.settingKey
             if key == "trollface_animate" or key == "trollface_music" or key == "trollface_volume" then
@@ -3774,16 +3777,16 @@ if not getgenv().freecam_data then
     getgenv().freecam_data = {cframe = nil, original_type = nil, char_anchored = false}
 end
 
-RunService.RenderStepped:Connect(function()
+G.RS.RenderStepped:Connect(function()
     local fc = getgenv().freecam_data
     if not getgenv().aim_settings.freecam_enabled then
         if fc.original_type then
-            Camera.CameraType = fc.original_type
+            G.Cam.CameraType = fc.original_type
             fc.original_type = nil
         end
         -- Разблокируем персонажа
-        if fc.char_anchored and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            LocalPlayer.Character.HumanoidRootPart.Anchored = false
+        if fc.char_anchored and G.LP.Character and G.LP.Character:FindFirstChild("HumanoidRootPart") then
+            G.LP.Character.HumanoidRootPart.Anchored = false
             fc.char_anchored = false
         end
         fc.cframe = nil
@@ -3791,29 +3794,29 @@ RunService.RenderStepped:Connect(function()
     end
     
     if not fc.original_type then
-        fc.original_type = Camera.CameraType
-        Camera.CameraType = Enum.CameraType.Custom
-        fc.cframe = Camera.CFrame
+        fc.original_type = G.Cam.CameraType
+        G.Cam.CameraType = Enum.CameraType.Custom
+        fc.cframe = G.Cam.CFrame
     end
     
     -- Блокируем персонажа
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        LocalPlayer.Character.HumanoidRootPart.Anchored = true
+    if G.LP.Character and G.LP.Character:FindFirstChild("HumanoidRootPart") then
+        G.LP.Character.HumanoidRootPart.Anchored = true
         fc.char_anchored = true
     end
     
     local s = getgenv().aim_settings.freecam_speed
     local m = Vector3.new(0,0,0)
     
-    if UserInputService:IsKeyDown(Enum.KeyCode.W) then m=m+fc.cframe.LookVector*s end
-    if UserInputService:IsKeyDown(Enum.KeyCode.S) then m=m-fc.cframe.LookVector*s end
-    if UserInputService:IsKeyDown(Enum.KeyCode.A) then m=m-fc.cframe.RightVector*s end
-    if UserInputService:IsKeyDown(Enum.KeyCode.D) then m=m+fc.cframe.RightVector*s end
-    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then m=m+Vector3.new(0,s,0) end
-    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then m=m-Vector3.new(0,s,0) end
+    if G.UIS:IsKeyDown(Enum.KeyCode.W) then m=m+fc.cframe.LookVector*s end
+    if G.UIS:IsKeyDown(Enum.KeyCode.S) then m=m-fc.cframe.LookVector*s end
+    if G.UIS:IsKeyDown(Enum.KeyCode.A) then m=m-fc.cframe.RightVector*s end
+    if G.UIS:IsKeyDown(Enum.KeyCode.D) then m=m+fc.cframe.RightVector*s end
+    if G.UIS:IsKeyDown(Enum.KeyCode.Space) then m=m+Vector3.new(0,s,0) end
+    if G.UIS:IsKeyDown(Enum.KeyCode.LeftShift) then m=m-Vector3.new(0,s,0) end
     
     fc.cframe = fc.cframe + m
-    local d = UserInputService:GetMouseDelta()
+    local d = G.UIS:GetMouseDelta()
     
     -- Убираем roll (переворачивание), оставляем только pitch (вверх-вниз) и yaw (влево-вправо)
     local lookVector = fc.cframe.LookVector
@@ -3825,10 +3828,10 @@ RunService.RenderStepped:Connect(function()
     -- Поворот по горизонтали (yaw) - всегда относительно мировой оси Y
     fc.cframe = CFrame.new(fc.cframe.Position) * CFrame.Angles(0, -d.X*0.003, 0) * (fc.cframe - fc.cframe.Position)
     
-    Camera.CFrame = fc.cframe
+    G.Cam.CFrame = fc.cframe
 end)
 
-RunService.RenderStepped:Connect(function()
+G.RS.RenderStepped:Connect(function()
     if not getgenv().aim_settings.running then return end
     
     local currentTime = tick()
@@ -3855,9 +3858,20 @@ RunService.RenderStepped:Connect(function()
     -- Update TP Walk
     updateTPWalk()
     
-    -- Update panels (только если GUI открыт)
+    -- Update Infinite Jump (проверяем изменение состояния)
+    if getgenv().aim_settings.infinite_jump_enabled and not IJ.c then
+        IJ_I()
+    elseif not getgenv().aim_settings.infinite_jump_enabled and IJ.c then
+        if IJ.c then
+            IJ.c:Disconnect()
+            IJ.c = nil
+        end
+        IJ_CP()
+    end
+    
+    -- Update State.panels (только если GUI открыт)
     if ScreenGui.Enabled then
-        for _, panel in ipairs(panels) do
+        for _, panel in ipairs(State.panels) do
             panel:update()
         end
     end
@@ -3867,7 +3881,7 @@ RunService.RenderStepped:Connect(function()
     
     -- Update TargetHud dragging
     if targetHudDragging then
-        local mouse = UserInputService:GetMouseLocation()
+        local mouse = G.UIS:GetMouseLocation()
         local delta = Vector2.new(mouse.X - targetHudDragStart.X, mouse.Y - targetHudDragStart.Y)
         TargetHudFrame.Position = UDim2.new(
             0,
@@ -3898,11 +3912,11 @@ RunService.RenderStepped:Connect(function()
     -- FOV Circle
     FOVCircle.Visible = getgenv().aim_settings.enabled
     FOVCircle.Radius = getgenv().aim_settings.fov
-    FOVCircle.Position = UserInputService:GetMouseLocation()
+    FOVCircle.Position = G.UIS:GetMouseLocation()
     
     -- Target ESP (создается на игроке через BillboardGui)
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
+    for _, p in pairs(G.Plr:GetPlayers()) do
+        if p ~= G.LP and p.Character then
             -- Определяем часть тела для Target ESP в зависимости от hitbox
             local targetPart
             if getgenv().aim_settings.hitbox == "Head" then
@@ -3916,7 +3930,7 @@ RunService.RenderStepped:Connect(function()
                 local targetESP = targetPart:FindFirstChild("Y_Target_ESP")
                 
                 -- Показываем ESP только на заблокированной цели
-                if getgenv().aim_settings.target_esp and LockedTarget and LockedTarget.Parent == p.Character then
+                if getgenv().aim_settings.target_esp and State.LockedTarget and State.LockedTarget.Parent == p.Character then
                     if not targetESP then
                         -- Создаем BillboardGui для Target ESP
                         targetESP = Instance.new("BillboardGui", targetPart)
@@ -4057,8 +4071,8 @@ RunService.RenderStepped:Connect(function()
     end
     
     -- ESP Logic
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
+    for _, p in pairs(G.Plr:GetPlayers()) do
+        if p ~= G.LP and p.Character then
             local isFriendPlayer = isFriend(p.Name)
             
             -- Highlight (подсветка игрока)
@@ -4100,8 +4114,8 @@ RunService.RenderStepped:Connect(function()
                 
                 -- Обновляем текст
                 local hum = p.Character:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    local distance = math.floor((head.Position - Camera.CFrame.Position).Magnitude)
+                if hum and G.Cam and G.Cam.CFrame then
+                    local distance = math.floor((head.Position - G.Cam.CFrame.Position).Magnitude)
                     local health = math.floor(hum.Health)
                     local maxHealth = math.floor(hum.MaxHealth)
                     textLabel.Text = p.Name .. "\n" .. health .. "/" .. maxHealth .. " HP\n" .. distance .. " studs"
@@ -4142,13 +4156,13 @@ RunService.RenderStepped:Connect(function()
     
     -- Speed Display
     SpeedLabel.Visible = getgenv().aim_settings.speed_display
-    if getgenv().aim_settings.speed_display and LockedTarget and LockedTarget.Parent then
-        local character = LockedTarget.Parent
+    if getgenv().aim_settings.speed_display and State.LockedTarget and State.LockedTarget.Parent then
+        local character = State.LockedTarget.Parent
         local humanoid = character:FindFirstChildOfClass("Humanoid")
-        local player = Players:GetPlayerFromCharacter(character)
+        local player = G.Plr:GetPlayerFromCharacter(character)
         
         if humanoid and humanoid.Health > 0 and player then
-            local velocity = LockedTarget.Velocity
+            local velocity = State.LockedTarget.Velocity
             local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
             local speed = math.floor(horizontalVelocity.Magnitude * 10) / 10
             SpeedLabel.Text = "Target Speed: " .. speed .. " studs/s"
@@ -4208,7 +4222,7 @@ RunService.RenderStepped:Connect(function()
         end
         
         -- Обновляем размер панели
-        tween(KeybindList, {Size = UDim2.new(0, 180, 0, keybindLayout.AbsoluteContentSize.Y + 10)}, 0.2)
+        tw(KeybindList, {Size = UDim2.new(0, 180, 0, keybindLayout.AbsoluteContentSize.Y + 10)}, 0.2)
     end
     
     -- Arrows Display
@@ -4219,17 +4233,17 @@ RunService.RenderStepped:Connect(function()
         animationStep = animationStep + (targetAnimationStep - animationStep) * 0.1
         local arrowSize = getgenv().aim_settings.arrows_size
         
-        local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local screenCenter = Vector2.new(G.Cam.ViewportSize.X / 2, G.Cam.ViewportSize.Y / 2)
         local activePlayers = {}
         
-        for _, p in pairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and p.Character then
+        for _, p in pairs(G.Plr:GetPlayers()) do
+            if p ~= G.LP and p.Character then
                 local head = p.Character:FindFirstChild("Head")
                 if head then
                     activePlayers[p.Name] = true
                     
                     -- Вычисляем направление игрока относительно текущего направления камеры
-                    local cameraCFrame = Camera.CFrame
+                    local cameraCFrame = G.Cam.CFrame
                     local relative = head.Position - cameraCFrame.Position
                     local flatRelative = Vector3.new(relative.X, 0, relative.Z)
                     
@@ -4316,7 +4330,7 @@ RunService.RenderStepped:Connect(function()
     
     if getgenv().aim_settings.hud_enabled and getgenv().aim_settings.watermark_enabled then
         local currentTime = tick()
-        local dt = RunService.RenderStepped:Wait()
+        local dt = G.RS.RenderStepped:Wait()
         
         -- Обновляем FPS и Ping раз в секунду
         if currentTime - lastUpdateTime >= 1.0 then
@@ -4374,7 +4388,7 @@ RunService.RenderStepped:Connect(function()
     
     -- Jump Circle Logic (только для локального игрока)
     if getgenv().aim_settings.jump_circle_enabled then
-        local player = LocalPlayer
+        local player = G.LP
         if player.Character then
             local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
             local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
@@ -4427,7 +4441,7 @@ RunService.RenderStepped:Connect(function()
                         imageLabel.Position = UDim2.new(0, 0, 0, 0)
                         imageLabel.BackgroundTransparency = 1
                         imageLabel.Image = "rbxassetid://74083143980512"
-                        imageLabel.ImageColor3 = Color3.fromRGB(255, 255, 255)
+                        imageLabel.ImageColor3 = getgenv().aim_settings.jump_circle_color
                         imageLabel.ImageTransparency = 1 -- Начинаем невидимым
                         
                         -- Создаем новый круг
@@ -4469,7 +4483,7 @@ RunService.RenderStepped:Connect(function()
                         imageLabel.Position = UDim2.new(0, 0, 0, 0)
                         imageLabel.BackgroundTransparency = 1
                         imageLabel.Image = "rbxassetid://74083143980512"
-                        imageLabel.ImageColor3 = Color3.fromRGB(255, 255, 255)
+                        imageLabel.ImageColor3 = getgenv().aim_settings.jump_circle_color
                         imageLabel.ImageTransparency = 1
                         
                         local circle = {
@@ -4506,6 +4520,9 @@ RunService.RenderStepped:Connect(function()
             else
                 local imageLabel = circle.imageLabel
                 if imageLabel then
+                    -- Обновляем цвет в реальном времени
+                    imageLabel.ImageColor3 = getgenv().aim_settings.jump_circle_color
+                    
                     local totalDuration = 2.0 / speed -- Общая длительность анимации
                     local appearDuration = totalDuration * 0.3 -- 30% времени на появление
                     local visibleDuration = totalDuration * 0.4 -- 40% времени видимый
@@ -4561,17 +4578,16 @@ RunService.RenderStepped:Connect(function()
     
     -- China Hat Logic
     if getgenv().aim_settings.cosmetic_enabled and getgenv().aim_settings.china_hat then
-        local player = LocalPlayer
+        local player = G.LP
         if player.Character then
             local head = player.Character:FindFirstChild("Head")
             if head then
                 -- Проверяем режим камеры для Hide in First Person
                 local shouldHide = false
                 if getgenv().aim_settings.hide_in_first_person then
-                    local camera = workspace.CurrentCamera
-                    if camera and camera.CameraSubject == player.Character.Humanoid then
+                    if G.Cam and G.Cam.CameraSubject == player.Character.Humanoid then
                         -- Более стабильная проверка первого лица
-                        local distance = (camera.CFrame.Position - head.Position).Magnitude
+                        local distance = (G.Cam.CFrame.Position - head.Position).Magnitude
                         local isFirstPerson = distance < 1.5
                         
                         -- Добавляем гистерезис для предотвращения мерцания
@@ -4593,76 +4609,185 @@ RunService.RenderStepped:Connect(function()
                 end
                 
                 -- Создаем China Hat для локального игрока если его нет
-                if not chinaHat then
+                if not State.chinaHat then
                     local hatData = createChinaHat(player.Name, true)
-                    chinaHat = hatData.hat
-                    chinaHatGradientLayers = hatData.layers
+                    State.chinaHat = hatData.hat
+                    State.chinaHatLayers = hatData.layers
                 end
                 
                 -- Обновляем China Hat локального игрока
-                local localHatData = {hat = chinaHat, layers = chinaHatGradientLayers}
+                local localHatData = {hat = State.chinaHat, layers = State.chinaHatLayers}
                 updateChinaHatPosition(localHatData, head, shouldHide)
             end
         end
         
         -- China Hat для друзей
         if getgenv().aim_settings.china_hat_friends then
-            for _, friendPlayer in pairs(Players:GetPlayers()) do
-                if friendPlayer ~= LocalPlayer and friendPlayer.Character and isFriend(friendPlayer.Name) then
+            for _, friendPlayer in pairs(G.Plr:GetPlayers()) do
+                if friendPlayer ~= G.LP and friendPlayer.Character and isFriend(friendPlayer.Name) then
                     local friendHead = friendPlayer.Character:FindFirstChild("Head")
                     if friendHead then
                         -- Создаем China Hat для друга если его нет
-                        if not friendsChinaHats[friendPlayer.Name] then
-                            friendsChinaHats[friendPlayer.Name] = createChinaHat(friendPlayer.Name, false)
+                        if not State.friendsHats[friendPlayer.Name] then
+                            State.friendsHats[friendPlayer.Name] = createChinaHat(friendPlayer.Name, false)
                         end
                         
                         -- Обновляем позицию China Hat друга (друзья всегда видимы)
-                        updateChinaHatPosition(friendsChinaHats[friendPlayer.Name], friendHead, false)
+                        updateChinaHatPosition(State.friendsHats[friendPlayer.Name], friendHead, false)
                     end
                 else
                     -- Удаляем China Hat если игрок больше не друг или вышел
-                    if friendsChinaHats[friendPlayer.Name] then
-                        destroyChinaHat(friendsChinaHats[friendPlayer.Name])
-                        friendsChinaHats[friendPlayer.Name] = nil
+                    if State.friendsHats[friendPlayer.Name] then
+                        destroyChinaHat(State.friendsHats[friendPlayer.Name])
+                        State.friendsHats[friendPlayer.Name] = nil
                     end
                 end
             end
         else
             -- Опция Friends выключена, удаляем все China Hat друзей
-            for playerName, hatData in pairs(friendsChinaHats) do
+            for playerName, hatData in pairs(State.friendsHats) do
                 destroyChinaHat(hatData)
             end
-            friendsChinaHats = {}
+            State.friendsHats = {}
         end
     else
         -- Cosmetic или China Hat выключен, удаляем все части
-        if chinaHat then
-            chinaHat:Destroy()
-            chinaHat = nil
+        if State.chinaHat then
+            State.chinaHat:Destroy()
+            State.chinaHat = nil
         end
         
-        for _, layer in ipairs(chinaHatGradientLayers) do
+        for _, layer in ipairs(State.chinaHatLayers) do
             if layer then
                 layer:Destroy()
             end
         end
-        chinaHatGradientLayers = {}
+        State.chinaHatLayers = {}
         
         -- Удаляем China Hat всех друзей
-        for playerName, hatData in pairs(friendsChinaHats) do
+        for playerName, hatData in pairs(State.friendsHats) do
             destroyChinaHat(hatData)
         end
-        friendsChinaHats = {}
+        State.friendsHats = {}
         
         -- Дополнительная очистка в workspace
         for _, obj in pairs(workspace:GetChildren()) do
-            if obj.Name:match("^ChinaHat") or obj.Name:match("^ChinaHatLayer") then
+            if obj.Name:match("^State.chinaHat") or obj.Name:match("^ChinaHatLayer") then
                 obj:Destroy()
             end
         end
         
         -- Сбрасываем режим камеры
         lastCameraMode = nil
+    end
+    
+    -- Trails Logic
+    if getgenv().aim_settings.cosmetic_enabled and getgenv().aim_settings.trails_enabled then
+        local character = G.LP.Character
+        if character then
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                -- Создаём Trail если его нет
+                if not State.trails.attachment0 then
+                    -- Attachment слева от персонажа
+                    local att0 = Instance.new("Attachment")
+                    att0.Name = "TrailAttachment0"
+                    att0.Position = Vector3.new(-1, 0, 0) -- Левая сторона
+                    att0.Parent = hrp
+                    State.trails.attachment0 = att0
+                    
+                    -- Attachment справа от персонажа
+                    local att1 = Instance.new("Attachment")
+                    att1.Name = "TrailAttachment1"
+                    att1.Position = Vector3.new(1, 0, 0) -- Правая сторона
+                    att1.Parent = hrp
+                    State.trails.attachment1 = att1
+                    
+                    -- Создаём Trail
+                    local trail = Instance.new("Trail")
+                    trail.Name = "PlayerTrail"
+                    trail.Attachment0 = att0
+                    trail.Attachment1 = att1
+                    trail.Lifetime = getgenv().aim_settings.trails_lifetime
+                    trail.MinLength = 0.1
+                    trail.FaceCamera = false -- ВАЖНО: отключаем FaceCamera чтобы не было эффекта "бумаги"
+                    trail.Enabled = true
+                    
+                    -- Современный минималистичный стиль
+                    trail.Color = ColorSequence.new(getgenv().aim_settings.trails_color)
+                    trail.Transparency = NumberSequence.new({
+                        NumberSequenceKeypoint.new(0, 0.3), -- Начало более прозрачное
+                        NumberSequenceKeypoint.new(0.5, 0.6),
+                        NumberSequenceKeypoint.new(1, 1) -- Конец полностью прозрачный
+                    })
+                    trail.LightEmission = 0.8 -- Больше свечения для современного вида
+                    trail.LightInfluence = 0 -- Не зависит от освещения
+                    
+                    -- Тонкий trail с плавным сужением
+                    trail.WidthScale = NumberSequence.new({
+                        NumberSequenceKeypoint.new(0, 1),
+                        NumberSequenceKeypoint.new(0.5, 0.6),
+                        NumberSequenceKeypoint.new(1, 0.2)
+                    })
+                    
+                    -- Используем Stretch режим для предотвращения эффекта "бумаги"
+                    trail.TextureMode = Enum.TextureMode.Stretch
+                    
+                    trail.Parent = hrp
+                    State.trails.trail = trail
+                end
+                
+                -- Обновляем настройки трейла
+                if State.trails.trail then
+                    State.trails.trail.Enabled = true
+                    State.trails.trail.Lifetime = getgenv().aim_settings.trails_lifetime
+                    State.trails.trail.Color = ColorSequence.new(getgenv().aim_settings.trails_color)
+                end
+            end
+        end
+    else
+        -- Trails выключен, удаляем все части
+        if State.trails.trail then
+            State.trails.trail:Destroy()
+            State.trails.trail = nil
+        end
+        if State.trails.attachment0 then
+            State.trails.attachment0:Destroy()
+            State.trails.attachment0 = nil
+        end
+        if State.trails.attachment1 then
+            State.trails.attachment1:Destroy()
+            State.trails.attachment1 = nil
+        end
+    end
+    
+    -- AntiFling Logic
+    if getgenv().aim_settings.anti_fling then
+        for _, player in pairs(G.Plr:GetPlayers()) do
+            if player ~= G.LP and player.Character then
+                for _, part in pairs(player.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        -- Сохраняем оригинальное значение если ещё не сохранено
+                        local key = tostring(part)
+                        if State.originalCanCollide[key] == nil then
+                            State.originalCanCollide[key] = {part = part, value = part.CanCollide}
+                        end
+                        -- Отключаем коллизию
+                        part.CanCollide = false
+                    end
+                end
+            end
+        end
+    else
+        -- AntiFling выключен, восстанавливаем оригинальные значения
+        for key, data in pairs(State.originalCanCollide) do
+            if data.part and data.part.Parent then
+                pcall(function()
+                    data.part.CanCollide = data.value
+                end)
+            end
+        end
+        State.originalCanCollide = {}
     end
     
     -- ClickGui Background Effects
@@ -4932,19 +5057,21 @@ RunService.RenderStepped:Connect(function()
         fullbrightActive = getgenv().aim_settings.fullbright
         
         if fullbrightActive then
-            Lighting.Brightness = 2
-            Lighting.ClockTime = 14
-            Lighting.FogEnd = 100000
-            Lighting.GlobalShadows = false
-            Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+            G.Light.Brightness = 2
+            G.Light.ClockTime = 14
+            G.Light.FogEnd = 100000
+            G.Light.GlobalShadows = false
+            G.Light.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
         else
-            Lighting.Brightness = originalLighting.Brightness
-            Lighting.FogEnd = originalLighting.FogEnd
-            Lighting.GlobalShadows = originalLighting.GlobalShadows
-            Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
+            if originalLighting.Brightness then
+                G.Light.Brightness = originalLighting.Brightness
+                G.Light.FogEnd = originalLighting.FogEnd
+                G.Light.GlobalShadows = originalLighting.GlobalShadows
+                G.Light.OutdoorAmbient = originalLighting.OutdoorAmbient
+            end
             -- Восстанавливаем ClockTime только если Always Day тоже выключен
-            if not getgenv().aim_settings.always_day then
-                Lighting.ClockTime = originalLighting.ClockTime
+            if not getgenv().aim_settings.always_day and originalLighting.ClockTime then
+                G.Light.ClockTime = originalLighting.ClockTime
             end
         end
     end
@@ -4954,11 +5081,11 @@ RunService.RenderStepped:Connect(function()
         alwaysDayActive = getgenv().aim_settings.always_day
         
         if alwaysDayActive then
-            Lighting.ClockTime = 12
+            G.Light.ClockTime = 12
         else
             -- Восстанавливаем только если FullBright тоже выключен
-            if not getgenv().aim_settings.fullbright then
-                Lighting.ClockTime = originalLighting.ClockTime
+            if not getgenv().aim_settings.fullbright and originalLighting.ClockTime then
+                G.Light.ClockTime = originalLighting.ClockTime
             end
         end
     end
@@ -4966,11 +5093,11 @@ RunService.RenderStepped:Connect(function()
     -- Target HUD Display
     -- Показываем если включен TargetHud И (есть цель ИЛИ меню открыто)
     local guiVisible = (panelAnimationState == "showing" or panelAnimationState == "visible")
-    TargetHudFrame.Visible = getgenv().aim_settings.target_hud and (LockedTarget ~= nil or guiVisible)
+    TargetHudFrame.Visible = getgenv().aim_settings.target_hud and (State.LockedTarget ~= nil or guiVisible)
     
-    if getgenv().aim_settings.target_hud and LockedTarget and LockedTarget.Parent then
-        local character = LockedTarget.Parent
-        local targetPlayer = Players:GetPlayerFromCharacter(character)
+    if getgenv().aim_settings.target_hud and State.LockedTarget and State.LockedTarget.Parent then
+        local character = State.LockedTarget.Parent
+        local targetPlayer = G.Plr:GetPlayerFromCharacter(character)
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         
         if targetPlayer and humanoid and humanoid.Health > 0 then
@@ -4982,7 +5109,7 @@ RunService.RenderStepped:Connect(function()
             TargetNameLabel.Text = targetPlayer.Name
             
             -- Обновляем HP
-            local hum = LockedTarget.Parent:FindFirstChildOfClass("Humanoid")
+            local hum = State.LockedTarget.Parent:FindFirstChildOfClass("Humanoid")
             if hum then
                 local health = math.floor(hum.Health)
                 local maxHealth = math.floor(hum.MaxHealth)
@@ -4990,7 +5117,7 @@ RunService.RenderStepped:Connect(function()
                 
                 -- Анимация HP бара
                 local healthPercent = math.clamp(health / maxHealth, 0, 1)
-                tween(HPBarFill, {Size = UDim2.new(healthPercent, 0, 1, 0)}, 0.2)
+                tw(HPBarFill, {Size = UDim2.new(healthPercent, 0, 1, 0)}, 0.2)
                 
                 TargetMetaLabel.Text = ""
                 
@@ -4998,14 +5125,14 @@ RunService.RenderStepped:Connect(function()
                 updateHPBarGradient()
             end
         else
-            -- Не сбрасываем здесь LockedTarget, чтобы lock target управлялся только аимботом.
+            -- Не сбрасываем здесь State.LockedTarget, чтобы lock target управлялся только аимботом.
         end
     elseif getgenv().aim_settings.target_hud and guiVisible then
         -- Показываем пример когда меню открыто
-        AvatarImage.Image = getHeadshotImage(LocalPlayer.UserId)
-        TargetNameLabel.Text = LocalPlayer.Name
+        AvatarImage.Image = getHeadshotImage(G.LP.UserId)
+        TargetNameLabel.Text = G.LP.Name
         TargetMetaLabel.Text = ""
-        local previewHumanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        local previewHumanoid = G.LP.Character and G.LP.Character:FindFirstChildOfClass("Humanoid")
         local previewHealth = math.floor((previewHumanoid and previewHumanoid.Health) or 100)
         local previewMaxHealth = math.max((previewHumanoid and previewHumanoid.MaxHealth) or 100, 1)
         TargetHPLabel.Text = "HP: " .. previewHealth
@@ -5015,7 +5142,7 @@ RunService.RenderStepped:Connect(function()
         updateHPBarGradient()
     end
     
-    -- Aimbot camera is updated in BindToRenderStep so fast mode can override recoil/shake.
+    -- Aimbot G.Cam is updated in BindToRenderStep so fast mode can override recoil/shake.
     
     -- Unload Script Logic
     if getgenv().aim_settings.unload_script then
@@ -5025,27 +5152,9 @@ RunService.RenderStepped:Connect(function()
         getgenv().aim_settings.china_hat_friends = false
         
         -- Очищаем Game Scripts connections
-        if getgenv().game_scripts_connections then
-            for scriptName, connections in pairs(getgenv().game_scripts_connections) do
-                for _, conn in pairs(connections) do
-                    pcall(function()
-                        if typeof(conn) == "RBXScriptConnection" then
-                            conn:Disconnect()
-                        elseif typeof(conn) == "table" and conn.Remove then
-                            conn:Remove()
-                        end
-                    end)
-                end
-            end
-            getgenv().game_scripts_connections = {}
-        end
-        
-        -- Unbind Game Scripts RenderSteps
-        pcall(function() RunService:UnbindFromRenderStep("Ohio_Aimbot") end)
-        pcall(function() RunService:UnbindFromRenderStep("Arsenal_Aimbot") end)
         
         pcall(function()
-            RunService:UnbindFromRenderStep("Y_AimbotCamera")
+            G.RS:UnbindFromRenderStep("Y_AimbotCamera")
         end)
         FOVCircle:Remove()
         
@@ -5078,38 +5187,64 @@ RunService.RenderStepped:Connect(function()
         end
         
         -- Очищаем China Hat
-        if chinaHat then
-            chinaHat:Destroy()
-            chinaHat = nil
+        if State.chinaHat then
+            State.chinaHat:Destroy()
+            State.chinaHat = nil
         end
         
-        for _, layer in ipairs(chinaHatGradientLayers) do
+        for _, layer in ipairs(State.chinaHatLayers) do
             if layer then
                 layer:Destroy()
             end
         end
-        chinaHatGradientLayers = {}
+        State.chinaHatLayers = {}
         
         -- Очищаем China Hat всех друзей
-        for playerName, hatData in pairs(friendsChinaHats) do
+        for playerName, hatData in pairs(State.friendsHats) do
             destroyChinaHat(hatData)
         end
-        friendsChinaHats = {}
+        State.friendsHats = {}
         for _, obj in pairs(workspace:GetChildren()) do
-            if obj.Name:match("^ChinaHat") or obj.Name:match("^ChinaHatLayer") then
+            if obj.Name:match("^State.chinaHat") or obj.Name:match("^ChinaHatLayer") then
                 obj:Destroy()
             end
         end
         lastCameraMode = nil
         
-        -- Восстанавливаем оригинальные настройки освещения
-        Lighting.Brightness = originalLighting.Brightness
-        Lighting.ClockTime = originalLighting.ClockTime
-        Lighting.FogEnd = originalLighting.FogEnd
-        Lighting.GlobalShadows = originalLighting.GlobalShadows
-        Lighting.OutdoorAmbient = originalLighting.OutdoorAmbient
+        -- Очищаем Trails
+        if State.trails.trail then
+            State.trails.trail:Destroy()
+            State.trails.trail = nil
+        end
+        if State.trails.attachment0 then
+            State.trails.attachment0:Destroy()
+            State.trails.attachment0 = nil
+        end
+        if State.trails.attachment1 then
+            State.trails.attachment1:Destroy()
+            State.trails.attachment1 = nil
+        end
         
-        for _, p in pairs(Players:GetPlayers()) do
+        -- Восстанавливаем AntiFling
+        for key, data in pairs(State.originalCanCollide) do
+            if data.part and data.part.Parent then
+                pcall(function()
+                    data.part.CanCollide = data.value
+                end)
+            end
+        end
+        State.originalCanCollide = {}
+        
+        -- Восстанавливаем оригинальные настройки освещения
+        if originalLighting.Brightness then
+            G.Light.Brightness = originalLighting.Brightness
+            G.Light.ClockTime = originalLighting.ClockTime
+            G.Light.FogEnd = originalLighting.FogEnd
+            G.Light.GlobalShadows = originalLighting.GlobalShadows
+            G.Light.OutdoorAmbient = originalLighting.OutdoorAmbient
+        end
+        
+        for _, p in pairs(G.Plr:GetPlayers()) do
             if p.Character then
                 if p.Character:FindFirstChild("Y_ESP") then
                     p.Character.Y_ESP:Destroy()
@@ -5143,15 +5278,15 @@ RunService.RenderStepped:Connect(function()
 end)
 
 pcall(function()
-    RunService:UnbindFromRenderStep("Y_AimbotCamera")
+    G.RS:UnbindFromRenderStep("Y_AimbotCamera")
 end)
 
-RunService:BindToRenderStep("Y_AimbotCamera", Enum.RenderPriority.Last.Value + 1, updateAimbotCamera or function() end)
+G.RS:BindToRenderStep("Y_AimbotCamera", Enum.RenderPriority.Last.Value + 1, updateAimbotCamera or function() end)
 
 -- [[ GLOBAL MOUSE RELEASE ]]
-UserInputService.InputEnded:Connect(function(input)
+G.UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        for _, panel in ipairs(panels) do
+        for _, panel in ipairs(State.panels) do
             panel.dragging = false
         end
         targetHudDragging = false
@@ -5159,11 +5294,11 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- [[ HOTKEYS & BINDS ]]
-UserInputService.InputBegan:Connect(function(input, gp)
+G.UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     
     -- Handle Binding (назначение клавиши) - проверяем первым
-    for _, p in ipairs(panels) do
+    for _, p in ipairs(State.panels) do
         if p.bindingModule then
             local key = input.KeyCode
             if key == Enum.KeyCode.Escape or key == Enum.KeyCode.Backspace then
@@ -5225,10 +5360,10 @@ UserInputService.InputBegan:Connect(function(input, gp)
             getgenv().aim_settings[settingKey] = not getgenv().aim_settings[settingKey]
             
             -- Обновляем визуально все кнопки с этим settingKey
-            for _, p in ipairs(panels) do
+            for _, p in ipairs(State.panels) do
                 for _, m in ipairs(p.modules) do
                     if m.settingKey == settingKey then
-                        tween(m.btn, {BackgroundColor3 = getgenv().aim_settings[settingKey] and getClientColor() or THEME.MODULE_BG}, 0.2)
+                        tw(m.btn, {BackgroundColor3 = getgenv().aim_settings[settingKey] and getClientColor() or THEME.MODULE_BG}, 0.2)
                     end
                 end
             end
@@ -5237,6 +5372,60 @@ UserInputService.InputBegan:Connect(function(input, gp)
     end
 end)
 
-UserInputService.InputEnded:Connect(function(input, gp)
+G.UIS.InputEnded:Connect(function(input, gp)
     if gp then return end
 end)
+
+-- Инициализация Infinite Jump
+G.LP.CharacterAdded:Connect(function() 
+    wait(0.5) 
+    IJ_I()
+    
+    -- Очищаем трейлы при смерти персонажа
+    if State.trails.trail then
+        State.trails.trail:Destroy()
+        State.trails.trail = nil
+    end
+    if State.trails.attachment0 then
+        State.trails.attachment0:Destroy()
+        State.trails.attachment0 = nil
+    end
+    if State.trails.attachment1 then
+        State.trails.attachment1:Destroy()
+        State.trails.attachment1 = nil
+    end
+end)
+
+local lastIJM = getgenv().aim_settings.infinite_jump_mode
+local lastIJP = getgenv().aim_settings.infinite_jump_power
+G.RS.Heartbeat:Connect(function()
+    local modeChanged = getgenv().aim_settings.infinite_jump_mode ~= lastIJM
+    local powerChanged = getgenv().aim_settings.infinite_jump_power ~= lastIJP
+    
+    if modeChanged or powerChanged then
+        lastIJM = getgenv().aim_settings.infinite_jump_mode
+        lastIJP = getgenv().aim_settings.infinite_jump_power
+        
+        if getgenv().aim_settings.infinite_jump_enabled then
+            IJ_I()
+        end
+        
+        -- Обновляем силу прыжка в реальном времени
+        if powerChanged and G.LP.Character then
+            local hm = G.LP.Character:FindFirstChildOfClass("Humanoid")
+            if hm then
+                if hm.UseJumpPower then
+                    hm.JumpPower = lastIJP
+                else
+                    hm.JumpHeight = lastIJP / 10
+                end
+            end
+        end
+    end
+end)
+
+if G.LP.Character then IJ_I() end
+
+print("[Infinite Jump] OK")
+
+
