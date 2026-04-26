@@ -3703,6 +3703,39 @@ local OPTIMIZATION = {
 local lastHitboxUpdate = 0
 local lastColorCheck = 0
 
+-- Вспомогательные функции для уменьшения локальных переменных в RenderStepped
+local function updateGUIVisibility()
+    if not ScreenGui.Enabled then return end
+    
+    -- Show/Hide Trollface options
+    local isTrollface = getgenv().aim_settings.clickgui_image_mode == "trollface"
+    for _, panel in ipairs(panels) do
+        for _, module in ipairs(panel.modules) do
+            local key = module.settingKey
+            if key == "trollface_animate" or key == "trollface_music" or key == "trollface_volume" then
+                if module.container.Visible ~= isTrollface then
+                    module.container.Visible = isTrollface
+                end
+            end
+        end
+    end
+    
+    -- Update Chat visibility
+    local shouldShowChat = getgenv().aim_settings.chat_enabled
+    if ChatPanel.Visible ~= shouldShowChat then
+        ChatPanel.Visible = shouldShowChat
+        chatVisible = shouldShowChat
+        if shouldShowChat then
+            ChatToggle.Text = "−"
+            if #chatMessages == 0 then
+                loadAllMessages()
+            end
+        else
+            ChatToggle.Text = "+"
+        end
+    end
+end
+
 RunService.RenderStepped:Connect(function()
     if not getgenv().aim_settings.running then return end
     
@@ -3715,8 +3748,7 @@ RunService.RenderStepped:Connect(function()
     
     -- Обновляем цвета только при изменении client_color (оптимизировано)
     if currentTime - lastColorCheck >= OPTIMIZATION.COLOR_CHECK_INTERVAL then
-        local currentClientColor = getClientColor()
-        if currentClientColor ~= lastClientColor then
+        if getClientColor() ~= lastClientColor then
             updateAllColors()
         end
         lastColorCheck = currentTime
@@ -3738,36 +3770,8 @@ RunService.RenderStepped:Connect(function()
         end
     end
     
-    -- Show/Hide Trollface options (оптимизировано - кэшируем результат)
-    if ScreenGui.Enabled then
-        local isTrollface = getgenv().aim_settings.clickgui_image_mode == "trollface"
-        for _, panel in ipairs(panels) do
-            for _, module in ipairs(panel.modules) do
-                if module.settingKey == "trollface_animate" or module.settingKey == "trollface_music" or module.settingKey == "trollface_volume" then
-                    if module.container.Visible ~= isTrollface then
-                        module.container.Visible = isTrollface
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Update Chat visibility (только если GUI открыт)
-    if ScreenGui.Enabled then
-        local shouldShowChat = getgenv().aim_settings.chat_enabled
-        if ChatPanel.Visible ~= shouldShowChat then
-            ChatPanel.Visible = shouldShowChat
-            chatVisible = shouldShowChat
-            if shouldShowChat then
-                ChatToggle.Text = "−"
-                if #chatMessages == 0 then
-                    loadAllMessages()
-                end
-            else
-                ChatToggle.Text = "+"
-            end
-        end
-    end
+    -- Update GUI visibility
+    updateGUIVisibility()
     
     -- Update TargetHud dragging
     if targetHudDragging then
