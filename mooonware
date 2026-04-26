@@ -5,6 +5,11 @@ if not getgenv then
     getgenv = function() return _G end
 end
 
+-- Глобальное хранилище для Game Scripts connections
+if not getgenv().game_scripts_connections then
+    getgenv().game_scripts_connections = {}
+end
+
 getgenv().aim_settings = {
     enabled = false,
     fov = 150,
@@ -3057,6 +3062,14 @@ local pGamesScripts = CategoryPanel.new("Games Scripts", startX + (panelW + gap)
 -- Ohio Aimbot button
 pGamesScripts:addButton("Ohio Aimbot", function()
     local success, err = pcall(function()
+        -- Очищаем старые connections если есть
+        if getgenv().game_scripts_connections.ohio then
+            for _, conn in pairs(getgenv().game_scripts_connections.ohio) do
+                pcall(function() conn:Disconnect() end)
+            end
+            getgenv().game_scripts_connections.ohio = nil
+        end
+        
         -- Ohio Aimbot встроенный код
         if not getgenv then
             getgenv = function() return _G end
@@ -3147,15 +3160,19 @@ pGamesScripts:addButton("Ohio Aimbot", function()
             end
         end
 
-        OhioRunService.RenderStepped:Connect(function()
-            OhioFOV.Visible = true
-            OhioFOV.Radius = getgenv().ohio_settings.fov
-            OhioFOV.Position = OhioUserInput:GetMouseLocation()
-        end)
+        -- Сохраняем connections
+        getgenv().game_scripts_connections.ohio = {
+            fov = OhioRunService.RenderStepped:Connect(function()
+                OhioFOV.Visible = true
+                OhioFOV.Radius = getgenv().ohio_settings.fov
+                OhioFOV.Position = OhioUserInput:GetMouseLocation()
+            end),
+            fov_circle = OhioFOV
+        }
 
         OhioRunService:BindToRenderStep("Ohio_Aimbot", Enum.RenderPriority.Last.Value + 1, updateOhioAim)
 
-        OhioUserInput.InputBegan:Connect(function(input, gp)
+        getgenv().game_scripts_connections.ohio.input = OhioUserInput.InputBegan:Connect(function(input, gp)
             if gp then return end
             if input.KeyCode == getgenv().ohio_settings.toggle_key then
                 getgenv().ohio_settings.enabled = not getgenv().ohio_settings.enabled
@@ -3185,6 +3202,14 @@ end)
 -- Arsenal Aimbot button
 pGamesScripts:addButton("Arsenal Aimbot", function()
     local success, err = pcall(function()
+        -- Очищаем старые connections если есть
+        if getgenv().game_scripts_connections.arsenal then
+            for _, conn in pairs(getgenv().game_scripts_connections.arsenal) do
+                pcall(function() conn:Disconnect() end)
+            end
+            getgenv().game_scripts_connections.arsenal = nil
+        end
+        
         -- Arsenal Aimbot встроенный код
         if not getgenv then
             getgenv = function() return _G end
@@ -3224,7 +3249,6 @@ pGamesScripts:addButton("Arsenal Aimbot", function()
                 if player ~= ArsenalLocalPlayer and player.Character then
                     local hum = player.Character:FindFirstChildOfClass("Humanoid")
                     if hum and hum.Health > 0 then
-                        -- Arsenal использует Torso/UpperTorso для лучшего попадания
                         local torso = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
                         if torso then
                             local screenPos, onScreen = ArsenalCamera:WorldToViewportPoint(torso.Position)
@@ -3276,7 +3300,6 @@ pGamesScripts:addButton("Arsenal Aimbot", function()
                 ArsenalCamera.CFrame = CFrame.new(ArsenalCamera.CFrame.Position, targetPos)
             end
             
-            -- Auto shoot (опционально)
             if getgenv().arsenal_settings.auto_shoot and ArsenalTarget then
                 mouse1press()
                 wait(0.01)
@@ -3284,15 +3307,19 @@ pGamesScripts:addButton("Arsenal Aimbot", function()
             end
         end
 
-        ArsenalRunService.RenderStepped:Connect(function()
-            ArsenalFOV.Visible = true
-            ArsenalFOV.Radius = getgenv().arsenal_settings.fov
-            ArsenalFOV.Position = ArsenalUserInput:GetMouseLocation()
-        end)
+        -- Сохраняем connections
+        getgenv().game_scripts_connections.arsenal = {
+            fov = ArsenalRunService.RenderStepped:Connect(function()
+                ArsenalFOV.Visible = true
+                ArsenalFOV.Radius = getgenv().arsenal_settings.fov
+                ArsenalFOV.Position = ArsenalUserInput:GetMouseLocation()
+            end),
+            fov_circle = ArsenalFOV
+        }
 
         ArsenalRunService:BindToRenderStep("Arsenal_Aimbot", Enum.RenderPriority.Last.Value + 1, updateArsenalAim)
 
-        ArsenalUserInput.InputBegan:Connect(function(input, gp)
+        getgenv().game_scripts_connections.arsenal.input = ArsenalUserInput.InputBegan:Connect(function(input, gp)
             if gp then return end
             if input.KeyCode == getgenv().arsenal_settings.toggle_key then
                 getgenv().arsenal_settings.enabled = not getgenv().arsenal_settings.enabled
@@ -4931,6 +4958,27 @@ RunService.RenderStepped:Connect(function()
         getgenv().aim_settings.cosmetic_enabled = false
         getgenv().aim_settings.china_hat = false
         getgenv().aim_settings.china_hat_friends = false
+        
+        -- Очищаем Game Scripts connections
+        if getgenv().game_scripts_connections then
+            for scriptName, connections in pairs(getgenv().game_scripts_connections) do
+                for _, conn in pairs(connections) do
+                    pcall(function()
+                        if typeof(conn) == "RBXScriptConnection" then
+                            conn:Disconnect()
+                        elseif typeof(conn) == "table" and conn.Remove then
+                            conn:Remove()
+                        end
+                    end)
+                end
+            end
+            getgenv().game_scripts_connections = {}
+        end
+        
+        -- Unbind Game Scripts RenderSteps
+        pcall(function() RunService:UnbindFromRenderStep("Ohio_Aimbot") end)
+        pcall(function() RunService:UnbindFromRenderStep("Arsenal_Aimbot") end)
+        
         pcall(function()
             RunService:UnbindFromRenderStep("Y_AimbotCamera")
         end)
