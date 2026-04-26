@@ -83,6 +83,9 @@ getgenv().aim_settings = {
     -- TP Walk settings
     tp_walk_enabled = false,
     tp_walk_speed = 5,
+    -- Freecam settings
+    freecam_enabled = false,
+    freecam_speed = 1,
 }
 
 -- [[ SERVICES ]]
@@ -1046,7 +1049,8 @@ local MODULE_NAMES = {
     always_day = "Always Day",
     unload_script = "Unload Script",
     hitboxes_enabled = "Hitboxes",
-    tp_walk_enabled = "TP Walk"
+    tp_walk_enabled = "TP Walk",
+    freecam_enabled = "Freecam"
 }
 
 local function getBindDisplayName(settingKey)
@@ -2515,6 +2519,8 @@ table.insert(panels, pVisuals)
 local pMove = CategoryPanel.new("Movement", startX + (panelW + gap)*2, 50, panelW)
 local mTPWalk = pMove:addModule("TP Walk", "tp_walk_enabled", true)
 pMove:addSlider(mTPWalk, "Speed", "tp_walk_speed", 1, 10, 0.5)
+local mFreecam = pMove:addModule("Freecam", "freecam_enabled", true)
+pMove:addSlider(mFreecam, "Speed", "freecam_speed", 0.1, 5, 0.1)
 table.insert(panels, pMove)
 
 -- 4. MISC
@@ -3762,6 +3768,65 @@ local function updateGUIVisibility()
         end
     end
 end
+
+-- [[ FREECAM - ОТДЕЛЬНЫЙ RENDERSTEP ]]
+if not getgenv().freecam_data then
+    getgenv().freecam_data = {cframe = nil, original_type = nil, char_anchored = false}
+end
+
+RunService.RenderStepped:Connect(function()
+    local fc = getgenv().freecam_data
+    if not getgenv().aim_settings.freecam_enabled then
+        if fc.original_type then
+            Camera.CameraType = fc.original_type
+            fc.original_type = nil
+        end
+        -- Разблокируем персонажа
+        if fc.char_anchored and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            LocalPlayer.Character.HumanoidRootPart.Anchored = false
+            fc.char_anchored = false
+        end
+        fc.cframe = nil
+        return
+    end
+    
+    if not fc.original_type then
+        fc.original_type = Camera.CameraType
+        Camera.CameraType = Enum.CameraType.Custom
+        fc.cframe = Camera.CFrame
+    end
+    
+    -- Блокируем персонажа
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.Anchored = true
+        fc.char_anchored = true
+    end
+    
+    local s = getgenv().aim_settings.freecam_speed
+    local m = Vector3.new(0,0,0)
+    
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then m=m+fc.cframe.LookVector*s end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then m=m-fc.cframe.LookVector*s end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then m=m-fc.cframe.RightVector*s end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then m=m+fc.cframe.RightVector*s end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then m=m+Vector3.new(0,s,0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then m=m-Vector3.new(0,s,0) end
+    
+    fc.cframe = fc.cframe + m
+    local d = UserInputService:GetMouseDelta()
+    
+    -- Убираем roll (переворачивание), оставляем только pitch (вверх-вниз) и yaw (влево-вправо)
+    local lookVector = fc.cframe.LookVector
+    local rightVector = fc.cframe.RightVector
+    
+    -- Поворот по вертикали (pitch)
+    fc.cframe = fc.cframe * CFrame.Angles(-d.Y*0.003, 0, 0)
+    
+    -- Поворот по горизонтали (yaw) - всегда относительно мировой оси Y
+    fc.cframe = CFrame.new(fc.cframe.Position) * CFrame.Angles(0, -d.X*0.003, 0) * (fc.cframe - fc.cframe.Position)
+    
+    Camera.CFrame = fc.cframe
+end)
 
 RunService.RenderStepped:Connect(function()
     if not getgenv().aim_settings.running then return end
