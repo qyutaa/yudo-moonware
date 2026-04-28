@@ -12,11 +12,20 @@ getgenv().aim_settings = {
     priority = "Distance",
     lock_player = false,
     wall_check = false,
+    ignore_team = false,
     target_esp = false,
     target_esp_mode = "Crosshair",
     target_hud = false,
     esp_enabled = false,
-    esp_mode = "White",
+    esp_chams = false,
+    esp_nametags = true,
+    esp_hp_bar = true,
+    esp_tool = true,
+    esp_distance = true,
+    esp_hide_team = false,
+    esp_team_color = false,
+    esp_chams_outline = false,
+    esp_chams_color = Color3.fromRGB(255, 255, 255),
     friend_markers = false,
     arrows = false,
     arrows_radius = 60,
@@ -38,9 +47,29 @@ getgenv().aim_settings = {
     esp_chams = false,
     fullbright = false,
     always_day = false,
+    world_tweaks_enabled = false,
+    world_sky = "Default",
+    world_brightness = 2,
+    world_clock_time = 14,
+    world_fog_end = 100000,
+    world_fog_color = Color3.fromRGB(200, 200, 200),
+    world_ambient = Color3.fromRGB(128, 128, 128),
+    world_outdoor_ambient = Color3.fromRGB(128, 128, 128),
+    world_color_shift_top = Color3.fromRGB(255, 255, 255),
+    world_color_shift_bottom = Color3.fromRGB(255, 255, 255),
+    world_shadows_enabled = true,
+    world_bloom_enabled = false,
+    world_bloom_intensity = 1,
+    world_sunrays_enabled = false,
+    world_sunrays_intensity = 0.1,
+    world_color_correction_enabled = false,
+    world_saturation = 0,
+    world_contrast = 0,
+    world_tint_color = Color3.fromRGB(255, 255, 255),
     unload_script = false,
     hud_enabled = false,
     watermark_enabled = false,
+    player_info_enabled = false, -- Отображение информации о локальном игроке (скорость)
     client_color = Color3.fromRGB(200, 50, 50), -- Цвет клиента
     keybind_list_enabled = false,
     jump_circle_enabled = false,
@@ -62,7 +91,7 @@ getgenv().aim_settings = {
     china_hat_friends = false,
     trails_enabled = false, -- Trails за персонажем
     trails_color = Color3.fromRGB(0, 170, 255),
-    trails_lifetime = 2, -- Время жизни трейла в секундах
+    trails_lifetime = 2, -- Время жbизни трейла в секундах
     clickgui_bind = Enum.KeyCode.RightControl,
     hotkeys = {},
     friends = {},
@@ -91,7 +120,31 @@ getgenv().aim_settings = {
     infinite_jump_power = 50, -- Сила прыжка: 10-100 (чем больше, тем выше прыжок)
     infinite_jump_bypass = false, -- Обход античита: использует Velocity вместо ChangeState
     infinite_jump_fall_limit = 80, -- Ограничение скорости падения (для обхода детекта)
-    -- Freecam settings
+    -- Spider settings
+    spider_enabled = false,
+    spider_mode = "Default", -- "Default" или "Platform"
+    spider_bypass = false, -- Прыжки каждые 0.5-0.7 секунд для обхода
+    spider_fall_limit = 80, -- Ограничение скорости падения
+    -- Speed settings
+    speed_enabled = false,
+    speed_speed = 26,
+    speed_bypass = false,
+    speed_jump_interval = 0.3, -- Интервал прыжков (секунды)
+    -- Safe Walk settings
+    safe_walk_enabled = false,
+    -- Air Stuck settings
+    air_stuck_enabled = false,
+    -- Smooth Fall settings
+    smooth_fall_enabled = false,
+    smooth_fall_speed = 20, -- Скорость падения (10-80)
+    smooth_fall_smoothness = 0.5, -- Плавность (0.1-1.0)
+    -- Fly settings
+    fly_enabled = false,
+    fly_mode = "Gyro", -- "Gyro", "CFrame", "Platform", "Velocity", "Tween"
+    fly_speed = 1, -- Скорость полёта (0.1-5)
+    fly_bypass = false, -- Обход античита
+    fly_bypass_mode = "Velocity", -- "Velocity", "Teleport", "Hybrid", "Jitter", "Smooth"
+    -- Freecam settings (Misc)
     freecam_enabled = false,
     freecam_speed = 1,
 }
@@ -121,16 +174,122 @@ local State = {
     friendsHats = {},
     trails = {}, -- Хранение трейлов для персонажа
     originalCanCollide = {}, -- Хранение оригинальных значений CanCollide для AntiFling
+    spider = {}, -- Хранение данных Spider
+    airStuck = {}, -- Хранение данных Air Stuck
+    smoothFall = {}, -- Хранение данных Smooth Fall
+    speed = {}, -- Хранение данных Speed
+    fly = {}, -- Хранение данных Fly
+    connections = {}, -- Хранение всех connections для очистки
     uiRefreshers = {},
     lastClientColor = nil,
     panels = {},
     messagesCache = {},
     lastFetchTime = 0,
+    cacheTimeout = 2,
     targetRotation = 0,
     rotationDirection = 1,
     jumpCircles = {},
     lastJumpState = {},
-    keybindItems = {}
+    watermark = {
+        rotation = 0,
+        lastUpdateTime = 0,
+        currentFPS = 60,
+        currentPing = 0,
+        displayFPS = 60,
+        displayPing = 0,
+        fpsAnimProgress = 1,
+        pingAnimProgress = 1
+    },
+    keybindItems = {},
+    worldTweaks = {
+        active = false,
+        lastPreset = nil,
+        bloom = nil,
+        sunRays = nil,
+        colorCorrection = nil,
+        sky = nil,
+        originalLighting = {},
+        originalSky = nil,
+        fullbrightActive = false,
+        alwaysDayActive = false
+    },
+    trollface = {
+        animationTime = 0,
+        flashTime = 0,
+        shakeOffset = Vector2.new(0, 0),
+        originalPosition = nil,
+        music = nil
+    },
+    renaGif = {
+        frames = {
+            "rbxassetid://100655940196198",
+            "rbxassetid://104515822600324",
+            "rbxassetid://126963986192065",
+            "rbxassetid://130137903782397",
+            "rbxassetid://77116584055910",
+            "rbxassetid://76096715157524",
+            "rbxassetid://80849100745010",
+            "rbxassetid://116351862099543",
+            "rbxassetid://87428345379776",
+            "rbxassetid://140239031911886",
+            "rbxassetid://118897032571958",
+            "rbxassetid://80186935543442",
+            "rbxassetid://91675065643086",
+            "rbxassetid://88961188005516",
+            "rbxassetid://87500954074108",
+            "rbxassetid://138216914093606",
+            "rbxassetid://119053361135196",
+            "rbxassetid://132015355546770",
+            "rbxassetid://96255777308563",
+            "rbxassetid://137343794339339",
+            "rbxassetid://83283848548931",
+            "rbxassetid://99562575870919",
+            "rbxassetid://124317430759434",
+            "rbxassetid://96686538926957",
+            "rbxassetid://137253189193582",
+            "rbxassetid://96024406757970",
+            "rbxassetid://101626613467291",
+            "rbxassetid://90215763131152",
+            "rbxassetid://97252135566648",
+            "rbxassetid://137375813083072",
+            "rbxassetid://106787704775111",
+            "rbxassetid://116327295606045",
+            "rbxassetid://116481314153979",
+            "rbxassetid://122603964840369",
+            "rbxassetid://76875615914598",
+            "rbxassetid://75436012320946",
+            "rbxassetid://115501583328814",
+            "rbxassetid://111487998028387",
+            "rbxassetid://138939145631718",
+            "rbxassetid://97275822905351",
+            "rbxassetid://120778836959650",
+            "rbxassetid://79591695094028",
+            "rbxassetid://81360489537391",
+            "rbxassetid://86180347226115",
+            "rbxassetid://137021447869583",
+            "rbxassetid://133405604273630",
+            "rbxassetid://115162241942940",
+            "rbxassetid://94319086052490",
+            "rbxassetid://133881361538967",
+            "rbxassetid://86142300447667",
+            "rbxassetid://111698100395797",
+            "rbxassetid://109477336337340",
+            "rbxassetid://83069403788613",
+            "rbxassetid://84764386409890",
+            "rbxassetid://104441099424800",
+            "rbxassetid://133351707956796",
+            "rbxassetid://122255277962822",
+            "rbxassetid://87837075264229",
+            "rbxassetid://111994233211210",
+            "rbxassetid://89635320172222",
+            "rbxassetid://90318435963735",
+            "rbxassetid://98707530296487",
+            "rbxassetid://99750720176074"
+        },
+        index = 1,
+        time = 0,
+        delay = 0.11
+    }
 }
 
 -- Utility function (нужна для IJ)
@@ -256,6 +415,279 @@ local function IJ_I()
     end)
 
 end
+
+-- Movement Functions (объединены в таблицу для экономии local)
+local Movement = {}
+
+Movement.Spider = {
+    Cleanup = function()
+        if State.spider then
+            if State.spider.fallLimiter then State.spider.fallLimiter:Disconnect() end
+            if State.spider.platformConnection then State.spider.platformConnection:Disconnect() end
+            if State.spider.bypassTimer then State.spider.bypassTimer:Disconnect() end
+            if State.spider.platform then pcall(function() State.spider.platform:Destroy() end) end
+            State.spider = {}
+        end
+    end,
+    Init = function()
+        Movement.Spider.Cleanup()
+        if not getgenv().aim_settings.spider_enabled then return end
+        
+        State.spider = {ch = G.LP.Character}
+        if not State.spider.ch then return end
+        State.spider.hm = State.spider.ch:FindFirstChildOfClass("Humanoid")
+        State.spider.hr = State.spider.ch:FindFirstChild("HumanoidRootPart")
+        if not State.spider.hm or not State.spider.hr then return end
+        
+        State.spider.fallLimiter = G.RS.Heartbeat:Connect(function()
+            if not getgenv().aim_settings.spider_enabled or not (State.spider.ch and State.spider.ch.Parent and State.spider.hr) then
+                Movement.Spider.Cleanup()
+                return
+            end
+            if State.spider.hr.Velocity.Y < -getgenv().aim_settings.spider_fall_limit then
+                State.spider.hr.Velocity = Vector3.new(State.spider.hr.Velocity.X, -getgenv().aim_settings.spider_fall_limit, State.spider.hr.Velocity.Z)
+            end
+        end)
+        
+        if getgenv().aim_settings.spider_mode == "Platform" then
+            State.spider.platform = Instance.new("Part", workspace)
+            State.spider.platform.Size = Vector3.new(8, 0.5, 8)
+            State.spider.platform.Anchored = true
+            State.spider.platform.CanCollide = true
+            State.spider.platform.Transparency = 1
+            State.spider.platform.Material = Enum.Material.ForceField
+            State.spider.platform.CastShadow = false
+            
+            State.spider.platformConnection = G.RS.Heartbeat:Connect(function()
+                if not getgenv().aim_settings.spider_enabled or not (State.spider.platform and State.spider.hr and State.spider.hr.Parent) then
+                    Movement.Spider.Cleanup()
+                    return
+                end
+                State.spider.wd = false
+                for _, d in ipairs({Vector3.new(1,0,0), Vector3.new(-1,0,0), Vector3.new(0,0,1), Vector3.new(0,0,-1)}) do
+                    State.spider.rp = RaycastParams.new()
+                    State.spider.rp.FilterDescendantsInstances = {State.spider.ch}
+                    State.spider.rp.FilterType = Enum.RaycastFilterType.Blacklist
+                    if workspace:Raycast(State.spider.hr.Position, d * 3, State.spider.rp) then
+                        State.spider.wd = true
+                        break
+                    end
+                end
+                State.spider.platform.Position = State.spider.wd and (State.spider.hr.Position - Vector3.new(0, 3, 0)) or (State.spider.hr.Position - Vector3.new(0, 100, 0))
+            end)
+        end
+    end
+}
+
+Movement.AirStuck = {
+    Cleanup = function()
+        if State.airStuck then
+            if State.airStuck.connection then State.airStuck.connection:Disconnect() end
+            State.airStuck = {}
+        end
+    end,
+    Init = function()
+        Movement.AirStuck.Cleanup()
+        if not getgenv().aim_settings.air_stuck_enabled then return end
+        
+        State.airStuck = {ch = G.LP.Character}
+        if not State.airStuck.ch then return end
+        State.airStuck.hr = State.airStuck.ch:FindFirstChild("HumanoidRootPart")
+        if not State.airStuck.hr then return end
+        
+        State.airStuck.fp = State.airStuck.hr.Position
+        State.airStuck.lu = tick()
+        State.airStuck.mo = 0
+        
+        State.airStuck.connection = G.RS.Heartbeat:Connect(function()
+            if not getgenv().aim_settings.air_stuck_enabled or not (State.airStuck.ch and State.airStuck.ch.Parent and State.airStuck.hr and State.airStuck.hr.Parent) then
+                Movement.AirStuck.Cleanup()
+                return
+            end
+            State.airStuck.ct = tick()
+            State.airStuck.dt = State.airStuck.ct - State.airStuck.lu
+            State.airStuck.lu = State.airStuck.ct
+            State.airStuck.mo = State.airStuck.mo + State.airStuck.dt * 0.1
+            State.airStuck.hr.CFrame = CFrame.new(State.airStuck.fp + Vector3.new(math.sin(State.airStuck.mo) * 0.01, math.cos(State.airStuck.mo * 2) * 0.01, math.sin(State.airStuck.mo * 1.5) * 0.01))
+            State.airStuck.hr.Velocity = Vector3.new(0, 0, 0)
+            State.airStuck.hr.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+        end)
+    end
+}
+
+Movement.SmoothFall = {
+    Cleanup = function()
+        if State.smoothFall then
+            if State.smoothFall.connection then State.smoothFall.connection:Disconnect() end
+            State.smoothFall = {}
+        end
+    end,
+    Init = function()
+        Movement.SmoothFall.Cleanup()
+        if not getgenv().aim_settings.smooth_fall_enabled then return end
+        
+        State.smoothFall = {ch = G.LP.Character}
+        if not State.smoothFall.ch then return end
+        State.smoothFall.hm = State.smoothFall.ch:FindFirstChildOfClass("Humanoid")
+        State.smoothFall.hr = State.smoothFall.ch:FindFirstChild("HumanoidRootPart")
+        if not State.smoothFall.hm or not State.smoothFall.hr then return end
+        
+        State.smoothFall.connection = G.RS.Heartbeat:Connect(function()
+            if not getgenv().aim_settings.smooth_fall_enabled or not (State.smoothFall.ch and State.smoothFall.ch.Parent and State.smoothFall.hr and State.smoothFall.hr.Parent and State.smoothFall.hm) then
+                Movement.SmoothFall.Cleanup()
+                return
+            end
+            State.smoothFall.st = State.smoothFall.hm:GetState()
+            if State.smoothFall.st == Enum.HumanoidStateType.Freefall or State.smoothFall.st == Enum.HumanoidStateType.Flying then
+                if State.smoothFall.hr.Velocity.Y < -getgenv().aim_settings.smooth_fall_speed then
+                    State.smoothFall.hr.Velocity = Vector3.new(State.smoothFall.hr.Velocity.X, State.smoothFall.hr.Velocity.Y + (-getgenv().aim_settings.smooth_fall_speed - State.smoothFall.hr.Velocity.Y) * getgenv().aim_settings.smooth_fall_smoothness, State.smoothFall.hr.Velocity.Z)
+                end
+            end
+        end)
+    end
+}
+
+Movement.Speed = {
+    Cleanup = function()
+        if State.speed then
+            if State.speed.connection then State.speed.connection:Disconnect() end
+            if State.speed.hm and State.speed.originalWalkSpeed then
+                State.speed.hm.WalkSpeed = State.speed.originalWalkSpeed
+            end
+            State.speed = {}
+        end
+    end,
+    Init = function()
+        Movement.Speed.Cleanup()
+        if not getgenv().aim_settings.speed_enabled then return end
+
+        State.speed = {ch = G.LP.Character}
+        if not State.speed.ch then return end
+        State.speed.hm = State.speed.ch:FindFirstChildOfClass("Humanoid")
+        State.speed.hr = State.speed.ch:FindFirstChild("HumanoidRootPart")
+        if not State.speed.hm or not State.speed.hr then return end
+
+        State.speed.originalWalkSpeed = State.speed.hm.WalkSpeed
+        State.speed.lastJump = 0
+
+        State.speed.connection = G.RS.Heartbeat:Connect(function()
+            local s = getgenv().aim_settings
+            if not s.speed_enabled or not (State.speed.ch and State.speed.ch.Parent and State.speed.hm and State.speed.hr) then
+                Movement.Speed.Cleanup()
+                return
+            end
+
+            local hum = State.speed.hm
+            local root = State.speed.hr
+            local moveDirection = hum.MoveDirection
+            local desiredSpeed = math.max(s.speed_speed or 26, 16)
+            local currentVel = root.Velocity
+            local horizontal = Vector3.new(currentVel.X, 0, currentVel.Z)
+
+            hum.WalkSpeed = State.speed.originalWalkSpeed or 16
+
+            if s.speed_bypass then
+                if moveDirection.Magnitude > 0 then
+                    local targetHorizontal = moveDirection.Unit * desiredSpeed
+                    local smoothedHorizontal = horizontal:Lerp(targetHorizontal, 0.18)
+                    root.Velocity = Vector3.new(smoothedHorizontal.X, currentVel.Y, smoothedHorizontal.Z)
+
+                    local state = hum:GetState()
+                    if tick() - State.speed.lastJump >= s.speed_jump_interval and state ~= Enum.HumanoidStateType.Freefall and state ~= Enum.HumanoidStateType.FallingDown and state ~= Enum.HumanoidStateType.Jumping then
+                        hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                        State.speed.lastJump = tick()
+                    end
+                else
+                    root.Velocity = Vector3.new(currentVel.X * 0.82, currentVel.Y, currentVel.Z * 0.82)
+                end
+            else
+                if moveDirection.Magnitude > 0 then
+                    local targetHorizontal = moveDirection.Unit * desiredSpeed
+                    local pushedHorizontal = horizontal:Lerp(targetHorizontal, 0.32)
+                    root.Velocity = Vector3.new(pushedHorizontal.X, currentVel.Y, pushedHorizontal.Z)
+                elseif horizontal.Magnitude > 0.1 then
+                    root.Velocity = Vector3.new(currentVel.X * 0.75, currentVel.Y, currentVel.Z * 0.75)
+                end
+            end
+        end)
+    end
+}
+
+Movement.SafeWalk = {
+    Cleanup = function()
+        if State.safeWalk then
+            if State.safeWalk.connection then State.safeWalk.connection:Disconnect() end
+            State.safeWalk = {}
+        end
+    end,
+    Init = function()
+        Movement.SafeWalk.Cleanup()
+        if not getgenv().aim_settings.safe_walk_enabled then return end
+        
+        State.safeWalk = {ch = G.LP.Character}
+        if not State.safeWalk.ch then return end
+        State.safeWalk.hm = State.safeWalk.ch:FindFirstChildOfClass("Humanoid")
+        State.safeWalk.hr = State.safeWalk.ch:FindFirstChild("HumanoidRootPart")
+        if not State.safeWalk.hm or not State.safeWalk.hr then return end
+        
+        State.safeWalk.connection = G.RS.Heartbeat:Connect(function()
+            if not getgenv().aim_settings.safe_walk_enabled or not (State.safeWalk.ch and State.safeWalk.ch.Parent and State.safeWalk.hr and State.safeWalk.hr.Parent and State.safeWalk.hm) then
+                Movement.SafeWalk.Cleanup()
+                return
+            end
+            
+            -- Получаем направление движения от Humanoid
+            local moveDirection = State.safeWalk.hm.MoveDirection
+            
+            -- Если персонаж пытается двигаться
+            if moveDirection.Magnitude > 0.1 then
+                -- Конвертируем направление движения в мировые координаты
+                local worldMoveDirection = (State.safeWalk.hr.CFrame.RightVector * moveDirection.X) + (State.safeWalk.hr.CFrame.LookVector * moveDirection.Z)
+                worldMoveDirection = worldMoveDirection.Unit
+                
+                -- Проверяем землю впереди (на расстоянии 2.5 стада)
+                local checkDistance = 2.5
+                local checkPosition = State.safeWalk.hr.Position + (worldMoveDirection * checkDistance)
+                
+                -- Луч идёт сверху вниз
+                local rayOrigin = checkPosition + Vector3.new(0, 2, 0)
+                local rayDirection = Vector3.new(0, -20, 0) -- Проверяем 20 стадов вниз
+                
+                local rayParams = RaycastParams.new()
+                rayParams.FilterDescendantsInstances = {State.safeWalk.ch}
+                rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+                rayParams.IgnoreWater = false
+                
+                local rayResult = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+                
+                -- Если впереди нет земли - блокируем движение
+                if not rayResult then
+                    -- Обнуляем горизонтальную скорость, сохраняя вертикальную
+                    local currentVel = State.safeWalk.hr.Velocity
+                    State.safeWalk.hr.Velocity = Vector3.new(0, currentVel.Y, 0)
+                    
+                    -- Останавливаем движение через Humanoid
+                    State.safeWalk.hm:Move(Vector3.new(0, 0, 0), false)
+                    
+                    -- Дополнительно: якорим персонажа на мгновение
+                    State.safeWalk.hr.CFrame = State.safeWalk.hr.CFrame
+                end
+            end
+        end)
+    end
+}
+
+-- Wrapper functions for backward compatibility
+local function Spider_Init() Movement.Spider.Init() end
+local function Spider_Cleanup() Movement.Spider.Cleanup() end
+local function AirStuck_Init() Movement.AirStuck.Init() end
+local function AirStuck_Cleanup() Movement.AirStuck.Cleanup() end
+local function SmoothFall_Init() Movement.SmoothFall.Init() end
+local function SmoothFall_Cleanup() Movement.SmoothFall.Cleanup() end
+local function Speed_Init() Movement.Speed.Init() end
+local function Speed_Cleanup() Movement.Speed.Cleanup() end
+local function SafeWalk_Init() Movement.SafeWalk.Init() end
+local function SafeWalk_Cleanup() Movement.SafeWalk.Cleanup() end
 
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 2
@@ -510,8 +942,8 @@ DarkenFrame.Visible = false
 -- ClickGui Image в правом нижнем углу
 local ClickGuiImage = Instance.new("ImageLabel", ScreenGui)
 ClickGuiImage.Name = "ClickGuiImage"
-ClickGuiImage.Size = UDim2.new(0, 280, 0, 400) -- Увеличенный размер (пропорции 7:10)
-ClickGuiImage.Position = UDim2.new(1, -300, 1, -390) -- Правый нижний угол, ниже (отступ 10px снизу)
+ClickGuiImage.Size = UDim2.new(0, 240, 0, 460) -- Narrower and taller for renagif
+ClickGuiImage.Position = UDim2.new(1, -260, 1, -450) -- Keep a small margin from right and bottom
 ClickGuiImage.AnchorPoint = Vector2.new(0, 0)
 ClickGuiImage.BackgroundTransparency = 1
 ClickGuiImage.Image = "http://www.roblox.com/asset/?id=7331776981" -- По умолчанию Vanilla
@@ -576,16 +1008,14 @@ local function makeHttpRequest(method, url, headers, body)
 end
 
 -- Кэш для сообщений
-local messagesCache = {}
-local lastFetchTime = 0
 local cacheTimeout = 2 -- Кэш на 2 секунды
 
 -- Функция для получения сообщений с сервера
 local function fetchMessages()
     -- Используем кэш если прошло меньше 2 секунд
     local currentTime = tick()
-    if currentTime - lastFetchTime < cacheTimeout and #messagesCache > 0 then
-        return messagesCache
+    if currentTime - State.lastFetchTime < State.cacheTimeout and #State.messagesCache > 0 then
+        return State.messagesCache
     end
     
     local headers = {
@@ -602,9 +1032,9 @@ local function fetchMessages()
         end)
         
         if success and data and data.record and data.record.messages then
-            messagesCache = data.record.messages
-            lastFetchTime = currentTime
-            return messagesCache
+            State.messagesCache = data.record.messages
+            State.lastFetchTime = currentTime
+            return State.messagesCache
         else
             warn("Failed to parse messages:", data)
         end
@@ -613,7 +1043,7 @@ local function fetchMessages()
     end
     
     -- Возвращаем кэш если запрос не удался
-    return messagesCache or {}
+    return State.messagesCache or {}
 end
 
 -- Функция для отправки сообщения на сервер
@@ -643,8 +1073,8 @@ local function sendMessage(message)
     end
     
     -- Обновляем кэш
-    messagesCache = messages
-    lastFetchTime = tick()
+    State.messagesCache = messages
+    State.lastFetchTime = tick()
     
     local data = {
         messages = messages
@@ -669,10 +1099,8 @@ local function sendMessage(message)
 end
 
 -- Target ESP будет создаваться динамически на игроке через BillboardGui
-local targetRotation = 0
-local rotationDirection = 1
 
--- Speed Display Label (в HudScreenGui)
+-- Speed Display Label (в HudScreenGui) - показывает скорость цели
 local SpeedLabel = Instance.new("TextLabel", HudScreenGui)
 SpeedLabel.Size = UDim2.new(0, 250, 0, 30)
 SpeedLabel.Position = UDim2.new(0.5, -125, 0, 10)
@@ -684,6 +1112,28 @@ SpeedLabel.Font = Enum.Font.GothamBold
 SpeedLabel.TextSize = 14
 SpeedLabel.Visible = false
 Instance.new("UICorner", SpeedLabel).CornerRadius = UDim.new(0, 8)
+
+-- Player Info Label (в HudScreenGui) - показывает скорость локального игрока (слева снизу)
+local PlayerInfoLabel = Instance.new("TextLabel", HudScreenGui)
+PlayerInfoLabel.Name = "PlayerInfo"
+PlayerInfoLabel.Size = UDim2.new(0, 200, 0, 60)
+PlayerInfoLabel.Position = UDim2.new(0, 10, 1, -70)
+PlayerInfoLabel.AnchorPoint = Vector2.new(0, 0)
+PlayerInfoLabel.Text = "Speed: 0.0 studs/s"
+PlayerInfoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+PlayerInfoLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+PlayerInfoLabel.BackgroundTransparency = 0.3
+PlayerInfoLabel.Font = Enum.Font.GothamBold
+PlayerInfoLabel.TextSize = 16
+PlayerInfoLabel.TextXAlignment = Enum.TextXAlignment.Left
+PlayerInfoLabel.TextYAlignment = Enum.TextYAlignment.Top
+PlayerInfoLabel.Visible = false
+Instance.new("UICorner", PlayerInfoLabel).CornerRadius = UDim.new(0, 8)
+local playerInfoPadding = Instance.new("UIPadding", PlayerInfoLabel)
+playerInfoPadding.PaddingLeft = UDim.new(0, 10)
+playerInfoPadding.PaddingTop = UDim.new(0, 8)
+playerInfoPadding.PaddingRight = UDim.new(0, 10)
+playerInfoPadding.PaddingBottom = UDim.new(0, 8)
 
 -- Horizontal Watermark (в HudScreenGui)
 local WatermarkFrame = Instance.new("Frame", HudScreenGui)
@@ -816,17 +1266,8 @@ PingLabel.Name = "Ping"
 PingLabel.LayoutOrder = 7
 
 -- Переменные для анимации watermark
-local watermarkRotation = 0
-local watermarkSmoothPing = 0
 
 -- Переменные для обновления FPS/Ping раз в секунду
-local lastUpdateTime = 0
-local currentFPS = 60
-local currentPing = 0
-local displayFPS = 60
-local displayPing = 0
-local fpsAnimProgress = 1
-local pingAnimProgress = 1
 
 -- Функция для плавной анимации чисел (быстро в начале, медленно в конце)
 local function easeOutQuart(t)
@@ -850,6 +1291,7 @@ KeybindList.BackgroundColor3 = THEME.PANEL_BG
 KeybindList.BorderSizePixel = 0
 KeybindList.ClipsDescendants = true
 KeybindList.Visible = false
+KeybindList.ZIndex = 100
 Instance.new("UICorner", KeybindList).CornerRadius = UDim.new(0, 10)
 local keybindStroke = Instance.new("UIStroke", KeybindList)
 keybindStroke.Color = THEME.PANEL_STROKE
@@ -863,6 +1305,7 @@ keybindTitle.TextColor3 = THEME.TEXT_TITLE
 keybindTitle.Font = Enum.Font.GothamBold
 keybindTitle.TextSize = 14
 keybindTitle.LayoutOrder = 1
+keybindTitle.ZIndex = 101
 
 local keybindLayout = Instance.new("UIListLayout", KeybindList)
 keybindLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -873,12 +1316,14 @@ local keybindSpacer = Instance.new("Frame", KeybindList)
 keybindSpacer.Size = UDim2.new(1, -16, 0, 4)
 keybindSpacer.BackgroundTransparency = 1
 keybindSpacer.LayoutOrder = 2
+keybindSpacer.ZIndex = 100
 
 local keybindDivider = Instance.new("Frame", keybindSpacer)
 keybindDivider.Size = UDim2.new(1, 0, 0, 1)
 keybindDivider.Position = UDim2.new(0, 0, 0.5, 0)
 keybindDivider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 keybindDivider.BorderSizePixel = 0
+keybindDivider.ZIndex = 101
 
 local keybindDividerGradient = Instance.new("UIGradient", keybindDivider)
 keybindDividerGradient.Transparency = NumberSequence.new({
@@ -886,8 +1331,6 @@ keybindDividerGradient.Transparency = NumberSequence.new({
     NumberSequenceKeypoint.new(0.5, 0.7),
     NumberSequenceKeypoint.new(1, 1)
 })
-
-local keybindItems = {}
 
 -- Target HUD (в HudScreenGui)
 local TargetHudFrame = Instance.new("Frame", HudScreenGui)
@@ -969,6 +1412,16 @@ TargetHPLabel.Font = Enum.Font.Gotham
 TargetHPLabel.TextSize = 11
 TargetHPLabel.TextXAlignment = Enum.TextXAlignment.Left
 
+local TargetSpeedInfoLabel = Instance.new("TextLabel", InfoContainer)
+TargetSpeedInfoLabel.Size = UDim2.new(1, -4, 0, 12)
+TargetSpeedInfoLabel.Position = UDim2.new(0, 0, 1, -22)
+TargetSpeedInfoLabel.BackgroundTransparency = 1
+TargetSpeedInfoLabel.Text = "0.0 studs/s"
+TargetSpeedInfoLabel.TextColor3 = THEME.TEXT_DIM
+TargetSpeedInfoLabel.Font = Enum.Font.Gotham
+TargetSpeedInfoLabel.TextSize = 10
+TargetSpeedInfoLabel.TextXAlignment = Enum.TextXAlignment.Left
+
 -- HP Bar Background
 local HPBarBG = Instance.new("Frame", InfoContainer)
 HPBarBG.Size = UDim2.new(1, -2, 0, 8)
@@ -1022,27 +1475,345 @@ local animationStep = 60
 local targetAnimationStep = 60
 
 -- Сохраняем оригинальные настройки освещения (с проверкой)
-local originalLighting = {}
 pcall(function()
-    originalLighting = {
+    State.worldTweaks.originalLighting = {
         Brightness = G.Light.Brightness,
         ClockTime = G.Light.ClockTime,
         FogEnd = G.Light.FogEnd,
+        FogColor = G.Light.FogColor,
+        Ambient = G.Light.Ambient,
         GlobalShadows = G.Light.GlobalShadows,
-        OutdoorAmbient = G.Light.OutdoorAmbient
+        OutdoorAmbient = G.Light.OutdoorAmbient,
+        ColorShiftTop = G.Light.ColorShift_Top,
+        ColorShiftBottom = G.Light.ColorShift_Bottom
     }
 end)
 
--- Флаги для отслеживания состояния (чтобы не применять каждый кадр)
-local fullbrightActive = false
-local alwaysDayActive = false
+pcall(function()
+    local existingSky = G.Light:FindFirstChildOfClass("Sky")
+    if existingSky then
+        State.worldTweaks.originalSky = {
+            SkyboxBk = existingSky.SkyboxBk,
+            SkyboxDn = existingSky.SkyboxDn,
+            SkyboxFt = existingSky.SkyboxFt,
+            SkyboxLf = existingSky.SkyboxLf,
+            SkyboxRt = existingSky.SkyboxRt,
+            SkyboxUp = existingSky.SkyboxUp,
+            SunAngularSize = existingSky.SunAngularSize,
+            MoonAngularSize = existingSky.MoonAngularSize,
+            StarCount = existingSky.StarCount,
+            CelestialBodiesShown = existingSky.CelestialBodiesShown
+        }
+        State.worldTweaks.sky = existingSky
+    end
+end)
 
--- Trollface animation variables
-local trollfaceAnimationTime = 0
-local trollfaceFlashTime = 0
-local trollfaceShakeOffset = Vector2.new(0, 0)
-local trollfaceOriginalPosition = nil
-local trollfaceMusic = nil
+function ensureWorldTweaksSky()
+    if State.worldTweaks.sky and State.worldTweaks.sky.Parent then
+        return State.worldTweaks.sky
+    end
+
+    State.worldTweaks.sky = G.Light:FindFirstChildOfClass("Sky")
+    if not State.worldTweaks.sky then
+        State.worldTweaks.sky = Instance.new("Sky")
+        State.worldTweaks.sky.Name = "Y_WorldTweaksSky"
+        State.worldTweaks.sky.Parent = G.Light
+    end
+    return State.worldTweaks.sky
+end
+
+function applyWorldSkyPreset(presetName)
+    local s = getgenv().aim_settings
+    local sky = ensureWorldTweaksSky()
+
+    if presetName == "Sunset" then
+        s.world_brightness = 2.5
+        s.world_clock_time = 18.5
+        s.world_fog_end = 1800
+        s.world_fog_color = Color3.fromRGB(255, 170, 120)
+        s.world_ambient = Color3.fromRGB(145, 95, 95)
+        s.world_outdoor_ambient = Color3.fromRGB(170, 120, 110)
+        s.world_color_shift_top = Color3.fromRGB(255, 196, 128)
+        s.world_color_shift_bottom = Color3.fromRGB(255, 122, 80)
+        s.world_shadows_enabled = true
+    elseif presetName == "Night" then
+        s.world_brightness = 1.2
+        s.world_clock_time = 1
+        s.world_fog_end = 2800
+        s.world_fog_color = Color3.fromRGB(70, 85, 130)
+        s.world_ambient = Color3.fromRGB(50, 60, 95)
+        s.world_outdoor_ambient = Color3.fromRGB(70, 80, 120)
+        s.world_color_shift_top = Color3.fromRGB(140, 170, 255)
+        s.world_color_shift_bottom = Color3.fromRGB(60, 70, 120)
+        s.world_shadows_enabled = true
+    elseif presetName == "Void" then
+        s.world_brightness = 1
+        s.world_clock_time = 0
+        s.world_fog_end = 900
+        s.world_fog_color = Color3.fromRGB(35, 20, 55)
+        s.world_ambient = Color3.fromRGB(45, 20, 70)
+        s.world_outdoor_ambient = Color3.fromRGB(55, 25, 80)
+        s.world_color_shift_top = Color3.fromRGB(110, 60, 170)
+        s.world_color_shift_bottom = Color3.fromRGB(30, 10, 45)
+        s.world_shadows_enabled = false
+    elseif presetName == "Candy" then
+        s.world_brightness = 2.8
+        s.world_clock_time = 12.5
+        s.world_fog_end = 2200
+        s.world_fog_color = Color3.fromRGB(255, 210, 235)
+        s.world_ambient = Color3.fromRGB(255, 185, 220)
+        s.world_outdoor_ambient = Color3.fromRGB(255, 205, 230)
+        s.world_color_shift_top = Color3.fromRGB(255, 210, 250)
+        s.world_color_shift_bottom = Color3.fromRGB(255, 160, 215)
+        s.world_shadows_enabled = false
+    elseif presetName == "Day" then
+        s.world_brightness = 2.2
+        s.world_clock_time = 13
+        s.world_fog_end = 100000
+        s.world_fog_color = Color3.fromRGB(210, 235, 255)
+        s.world_ambient = Color3.fromRGB(120, 120, 120)
+        s.world_outdoor_ambient = Color3.fromRGB(145, 145, 145)
+        s.world_color_shift_top = Color3.fromRGB(255, 255, 255)
+        s.world_color_shift_bottom = Color3.fromRGB(255, 255, 255)
+        s.world_shadows_enabled = true
+    elseif presetName == "Golden" then
+        s.world_brightness = 2.2
+        s.world_clock_time = 13
+        s.world_fog_end = 100000
+        s.world_fog_color = Color3.fromRGB(210, 235, 255)
+        s.world_ambient = Color3.fromRGB(120, 120, 120)
+        s.world_outdoor_ambient = Color3.fromRGB(145, 145, 145)
+        s.world_color_shift_top = Color3.fromRGB(255, 255, 255)
+        s.world_color_shift_bottom = Color3.fromRGB(255, 255, 255)
+        s.world_shadows_enabled = true
+        if sky then
+            sky.SkyboxBk = "rbxassetid://162001887"
+            sky.SkyboxDn = "rbxassetid://161998893"
+            sky.SkyboxFt = "rbxassetid://162001897"
+            sky.SkyboxLf = "rbxassetid://162001904"
+            sky.SkyboxRt = "rbxassetid://162001919"
+            sky.SkyboxUp = "rbxassetid://162001926"
+            sky.CelestialBodiesShown = true
+        end
+    elseif presetName == "Blue" then
+        s.world_brightness = 2
+        s.world_clock_time = 13
+        s.world_fog_end = 100000
+        s.world_fog_color = Color3.fromRGB(210, 230, 255)
+        s.world_ambient = Color3.fromRGB(120, 120, 130)
+        s.world_outdoor_ambient = Color3.fromRGB(140, 140, 150)
+        s.world_color_shift_top = Color3.fromRGB(255, 255, 255)
+        s.world_color_shift_bottom = Color3.fromRGB(255, 255, 255)
+        s.world_shadows_enabled = true
+        if sky then
+            sky.SkyboxBk = "rbxassetid://225469345"
+            sky.SkyboxDn = "rbxassetid://225469349"
+            sky.SkyboxFt = "rbxassetid://225469359"
+            sky.SkyboxLf = "rbxassetid://225469364"
+            sky.SkyboxRt = "rbxassetid://225469372"
+            sky.SkyboxUp = "rbxassetid://225469380"
+            sky.CelestialBodiesShown = true
+        end
+    elseif presetName == "Apricot" then
+        s.world_brightness = 1.8
+        s.world_clock_time = 15
+        s.world_fog_end = 4000
+        s.world_fog_color = Color3.fromRGB(238, 220, 190)
+        s.world_ambient = Color3.fromRGB(150, 135, 120)
+        s.world_outdoor_ambient = Color3.fromRGB(170, 155, 135)
+        s.world_color_shift_top = Color3.fromRGB(255, 239, 214)
+        s.world_color_shift_bottom = Color3.fromRGB(255, 209, 170)
+        s.world_shadows_enabled = true
+        if sky then
+            sky.SkyboxBk = "rbxassetid://600830446"
+            sky.SkyboxDn = "rbxassetid://600831635"
+            sky.SkyboxFt = "rbxassetid://600832720"
+            sky.SkyboxLf = "rbxassetid://600886090"
+            sky.SkyboxRt = "rbxassetid://600833862"
+            sky.SkyboxUp = "rbxassetid://600835177"
+            sky.CelestialBodiesShown = false
+            sky.StarCount = 3000
+            sky.SunAngularSize = 21
+            sky.MoonAngularSize = 11
+        end
+    elseif presetName == "Golden Hour" then
+        s.world_brightness = 2.9
+        s.world_clock_time = 17.5
+        s.world_fog_end = 2600
+        s.world_fog_color = Color3.fromRGB(255, 196, 130)
+        s.world_ambient = Color3.fromRGB(155, 120, 88)
+        s.world_outdoor_ambient = Color3.fromRGB(188, 145, 105)
+        s.world_color_shift_top = Color3.fromRGB(255, 226, 168)
+        s.world_color_shift_bottom = Color3.fromRGB(255, 163, 103)
+        s.world_shadows_enabled = true
+    elseif presetName == "Dream" then
+        s.world_brightness = 2.6
+        s.world_clock_time = 14.5
+        s.world_fog_end = 2100
+        s.world_fog_color = Color3.fromRGB(240, 214, 255)
+        s.world_ambient = Color3.fromRGB(150, 125, 180)
+        s.world_outdoor_ambient = Color3.fromRGB(182, 160, 208)
+        s.world_color_shift_top = Color3.fromRGB(255, 230, 255)
+        s.world_color_shift_bottom = Color3.fromRGB(224, 176, 255)
+        s.world_shadows_enabled = false
+    elseif presetName == "Aurora" then
+        s.world_brightness = 2.1
+        s.world_clock_time = 2.5
+        s.world_fog_end = 2400
+        s.world_fog_color = Color3.fromRGB(96, 178, 185)
+        s.world_ambient = Color3.fromRGB(52, 76, 104)
+        s.world_outdoor_ambient = Color3.fromRGB(65, 96, 128)
+        s.world_color_shift_top = Color3.fromRGB(136, 255, 215)
+        s.world_color_shift_bottom = Color3.fromRGB(94, 118, 255)
+        s.world_shadows_enabled = true
+    elseif presetName == "Arctic" then
+        s.world_brightness = 2.4
+        s.world_clock_time = 11.5
+        s.world_fog_end = 4200
+        s.world_fog_color = Color3.fromRGB(214, 240, 255)
+        s.world_ambient = Color3.fromRGB(140, 168, 190)
+        s.world_outdoor_ambient = Color3.fromRGB(175, 205, 225)
+        s.world_color_shift_top = Color3.fromRGB(242, 250, 255)
+        s.world_color_shift_bottom = Color3.fromRGB(176, 220, 255)
+        s.world_shadows_enabled = true
+    elseif presetName == "Rose" then
+        s.world_brightness = 2.5
+        s.world_clock_time = 16
+        s.world_fog_end = 2500
+        s.world_fog_color = Color3.fromRGB(255, 208, 224)
+        s.world_ambient = Color3.fromRGB(172, 118, 138)
+        s.world_outdoor_ambient = Color3.fromRGB(210, 152, 170)
+        s.world_color_shift_top = Color3.fromRGB(255, 228, 238)
+        s.world_color_shift_bottom = Color3.fromRGB(255, 166, 196)
+        s.world_shadows_enabled = false
+    elseif presetName == "Storm" then
+        s.world_brightness = 1.2
+        s.world_clock_time = 15
+        s.world_fog_end = 1400
+        s.world_fog_color = Color3.fromRGB(112, 125, 145)
+        s.world_ambient = Color3.fromRGB(66, 76, 92)
+        s.world_outdoor_ambient = Color3.fromRGB(84, 95, 112)
+        s.world_color_shift_top = Color3.fromRGB(162, 180, 205)
+        s.world_color_shift_bottom = Color3.fromRGB(82, 90, 110)
+        s.world_shadows_enabled = true
+    else
+        s.world_brightness = State.worldTweaks.originalLighting.Brightness or 2
+        s.world_clock_time = State.worldTweaks.originalLighting.ClockTime or 14
+        s.world_fog_end = State.worldTweaks.originalLighting.FogEnd or 100000
+        s.world_fog_color = State.worldTweaks.originalLighting.FogColor or Color3.fromRGB(200, 200, 200)
+        s.world_ambient = State.worldTweaks.originalLighting.Ambient or Color3.fromRGB(128, 128, 128)
+        s.world_outdoor_ambient = State.worldTweaks.originalLighting.OutdoorAmbient or Color3.fromRGB(128, 128, 128)
+        s.world_color_shift_top = State.worldTweaks.originalLighting.ColorShiftTop or Color3.fromRGB(255, 255, 255)
+        s.world_color_shift_bottom = State.worldTweaks.originalLighting.ColorShiftBottom or Color3.fromRGB(255, 255, 255)
+        s.world_shadows_enabled = State.worldTweaks.originalLighting.GlobalShadows ~= false
+        if sky and State.worldTweaks.originalSky then
+            sky.SkyboxBk = State.worldTweaks.originalSky.SkyboxBk
+            sky.SkyboxDn = State.worldTweaks.originalSky.SkyboxDn
+            sky.SkyboxFt = State.worldTweaks.originalSky.SkyboxFt
+            sky.SkyboxLf = State.worldTweaks.originalSky.SkyboxLf
+            sky.SkyboxRt = State.worldTweaks.originalSky.SkyboxRt
+            sky.SkyboxUp = State.worldTweaks.originalSky.SkyboxUp
+            sky.SunAngularSize = State.worldTweaks.originalSky.SunAngularSize
+            sky.MoonAngularSize = State.worldTweaks.originalSky.MoonAngularSize
+            sky.StarCount = State.worldTweaks.originalSky.StarCount
+            sky.CelestialBodiesShown = State.worldTweaks.originalSky.CelestialBodiesShown
+        end
+    end
+end
+
+function ensureWorldTweaksEffects()
+    if not State.worldTweaks.bloom or not State.worldTweaks.bloom.Parent then
+        State.worldTweaks.bloom = G.Light:FindFirstChild("Y_WorldTweaksBloom") or Instance.new("BloomEffect")
+        State.worldTweaks.bloom.Name = "Y_WorldTweaksBloom"
+        State.worldTweaks.bloom.Size = 24
+        State.worldTweaks.bloom.Threshold = 1
+        State.worldTweaks.bloom.Parent = G.Light
+    end
+
+    if not State.worldTweaks.sunRays or not State.worldTweaks.sunRays.Parent then
+        State.worldTweaks.sunRays = G.Light:FindFirstChild("Y_WorldTweaksSunRays") or Instance.new("SunRaysEffect")
+        State.worldTweaks.sunRays.Name = "Y_WorldTweaksSunRays"
+        State.worldTweaks.sunRays.Parent = G.Light
+    end
+
+    if not State.worldTweaks.colorCorrection or not State.worldTweaks.colorCorrection.Parent then
+        State.worldTweaks.colorCorrection = G.Light:FindFirstChild("Y_WorldTweaksColorCorrection") or Instance.new("ColorCorrectionEffect")
+        State.worldTweaks.colorCorrection.Name = "Y_WorldTweaksColorCorrection"
+        State.worldTweaks.colorCorrection.Parent = G.Light
+    end
+end
+
+function restoreWorldTweaks()
+    if State.worldTweaks.originalLighting.Brightness then
+        G.Light.Brightness = State.worldTweaks.originalLighting.Brightness
+        G.Light.ClockTime = State.worldTweaks.originalLighting.ClockTime
+        G.Light.FogEnd = State.worldTweaks.originalLighting.FogEnd
+        G.Light.FogColor = State.worldTweaks.originalLighting.FogColor
+        G.Light.Ambient = State.worldTweaks.originalLighting.Ambient
+        G.Light.GlobalShadows = State.worldTweaks.originalLighting.GlobalShadows
+        G.Light.OutdoorAmbient = State.worldTweaks.originalLighting.OutdoorAmbient
+        G.Light.ColorShift_Top = State.worldTweaks.originalLighting.ColorShiftTop
+        G.Light.ColorShift_Bottom = State.worldTweaks.originalLighting.ColorShiftBottom
+    end
+
+    if State.worldTweaks.sky and State.worldTweaks.sky.Parent and State.worldTweaks.originalSky then
+        State.worldTweaks.sky.SkyboxBk = State.worldTweaks.originalSky.SkyboxBk
+        State.worldTweaks.sky.SkyboxDn = State.worldTweaks.originalSky.SkyboxDn
+        State.worldTweaks.sky.SkyboxFt = State.worldTweaks.originalSky.SkyboxFt
+        State.worldTweaks.sky.SkyboxLf = State.worldTweaks.originalSky.SkyboxLf
+        State.worldTweaks.sky.SkyboxRt = State.worldTweaks.originalSky.SkyboxRt
+        State.worldTweaks.sky.SkyboxUp = State.worldTweaks.originalSky.SkyboxUp
+        State.worldTweaks.sky.SunAngularSize = State.worldTweaks.originalSky.SunAngularSize
+        State.worldTweaks.sky.MoonAngularSize = State.worldTweaks.originalSky.MoonAngularSize
+        State.worldTweaks.sky.StarCount = State.worldTweaks.originalSky.StarCount
+        State.worldTweaks.sky.CelestialBodiesShown = State.worldTweaks.originalSky.CelestialBodiesShown
+    end
+
+    if State.worldTweaks.bloom then State.worldTweaks.bloom.Enabled = false end
+    if State.worldTweaks.sunRays then State.worldTweaks.sunRays.Enabled = false end
+    if State.worldTweaks.colorCorrection then State.worldTweaks.colorCorrection.Enabled = false end
+
+    State.worldTweaks.active = false
+    State.worldTweaks.lastPreset = nil
+    State.worldTweaks.fullbrightActive = not getgenv().aim_settings.fullbright
+    State.worldTweaks.alwaysDayActive = not getgenv().aim_settings.always_day
+end
+
+function applyWorldTweaks()
+    local s = getgenv().aim_settings
+
+    if s.world_sky ~= State.worldTweaks.lastPreset then
+        applyWorldSkyPreset(s.world_sky)
+        State.worldTweaks.lastPreset = s.world_sky
+    end
+
+    ensureWorldTweaksEffects()
+
+    G.Light.Brightness = s.world_brightness
+    G.Light.ClockTime = s.world_clock_time
+    G.Light.FogEnd = s.world_fog_end
+    G.Light.FogColor = s.world_fog_color
+    G.Light.Ambient = s.world_ambient
+    G.Light.GlobalShadows = s.world_shadows_enabled
+    G.Light.OutdoorAmbient = s.world_outdoor_ambient
+    G.Light.ColorShift_Top = s.world_color_shift_top
+    G.Light.ColorShift_Bottom = s.world_color_shift_bottom
+
+    State.worldTweaks.bloom.Enabled = s.world_bloom_enabled
+    State.worldTweaks.bloom.Intensity = s.world_bloom_intensity
+
+    State.worldTweaks.sunRays.Enabled = s.world_sunrays_enabled
+    State.worldTweaks.sunRays.Intensity = s.world_sunrays_intensity
+
+    State.worldTweaks.colorCorrection.Enabled = s.world_color_correction_enabled
+    State.worldTweaks.colorCorrection.Saturation = s.world_saturation
+    State.worldTweaks.colorCorrection.Contrast = s.world_contrast
+    State.worldTweaks.colorCorrection.TintColor = s.world_tint_color
+
+    State.worldTweaks.active = true
+end
+
+-- Флаги для отслеживания состояния (чтобы не применять каждый кадр)
 
 -- Функция создания China Hat
 local function createChinaHat(playerName, isLocalPlayer)
@@ -1159,12 +1930,18 @@ local function destroyChinaHat(hatData)
     if not hatData then return end
     
     if hatData.hat then
-        hatData.hat:Destroy()
+        pcall(function()
+            hatData.hat:Destroy()
+        end)
     end
     
-    for _, layer in ipairs(hatData.layers) do
-        if layer then
-            layer:Destroy()
+    if hatData.layers and type(hatData.layers) == "table" then
+        for _, layer in ipairs(hatData.layers) do
+            if layer then
+                pcall(function()
+                    layer:Destroy()
+                end)
+            end
         end
     end
 end
@@ -1177,8 +1954,6 @@ function ColorUtil.getColorStyle(angle)
 end
 
 -- JumpCircle variables
-local jumpCircles = {}
-local lastJumpState = {}
 
 local MODULE_NAMES = {
     enabled = "Aimbot",
@@ -1205,6 +1980,7 @@ local MODULE_NAMES = {
     click_action = "Friend Add/Rem",
     fullbright = "FullBright",
     always_day = "Always Day",
+    world_tweaks_enabled = "World Tweaks",
     unload_script = "Unload Script",
     hitboxes_enabled = "Hitboxes",
     tp_walk_enabled = "TP Walk",
@@ -1333,6 +2109,11 @@ local function getClosest()
         if v ~= G.LP and v.Character then
             -- Пропускаем друзей
             if isFriend(v.Name) then
+                continue
+            end
+            
+            -- Пропускаем игроков из своей команды если включен Ignore Team
+            if getgenv().aim_settings.ignore_team and v.Team == G.LP.Team and v.Team ~= nil then
                 continue
             end
             
@@ -1722,7 +2503,21 @@ function CategoryPanel.new(name, x, y, width)
     })
     
     self.layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        tw(self.frame, {Size = UDim2.new(0, self.width, 0, self.layout.AbsoluteContentSize.Y + 10)}, 0.3)
+        local targetSize = UDim2.new(0, self.width, 0, self.layout.AbsoluteContentSize.Y + 10)
+
+        if panelAnimationState == "visible" and (self.frame.AnchorPoint.X ~= 0 or self.frame.AnchorPoint.Y ~= 0) then
+            local currentPosition = self.frame.Position
+            local topLeftX = currentPosition.X.Offset - (self.frame.Size.X.Offset * self.frame.AnchorPoint.X)
+            local topLeftY = currentPosition.Y.Offset - (self.frame.Size.Y.Offset * self.frame.AnchorPoint.Y)
+            self.frame.AnchorPoint = Vector2.new(0, 0)
+            self.frame.Position = UDim2.new(currentPosition.X.Scale, topLeftX, currentPosition.Y.Scale, topLeftY)
+        end
+
+        if panelAnimationState == "visible" then
+            self.frame.Size = targetSize
+        else
+            tw(self.frame, {Size = targetSize}, 0.3)
+        end
     end)
     
     return self
@@ -2484,27 +3279,23 @@ end
 local function getVisibleKeybindEntries()
     local entries = {}
 
-    for settingKey, keyCode in pairs(getgenv().aim_settings.hotkeys) do
-        if getgenv().aim_settings[settingKey] and keyCode and keyCode ~= Enum.KeyCode.Unknown then
-            table.insert(entries, {
-                name = getBindDisplayName(settingKey),
-                keyCode = keyCode
-            })
+    local function addEntry(settingKey, keyCode, active)
+        if not keyCode or keyCode == Enum.KeyCode.Unknown then
+            return
         end
-    end
 
-    if getgenv().aim_settings.clickgui_enabled and getgenv().aim_settings.clickgui_bind and getgenv().aim_settings.clickgui_bind ~= Enum.KeyCode.Unknown then
         table.insert(entries, {
-            name = getBindDisplayName("clickgui_enabled"),
-            keyCode = getgenv().aim_settings.clickgui_bind
+            name = getBindDisplayName(settingKey),
+            keyCode = keyCode,
+            active = active == true
         })
     end
 
-    if getgenv().aim_settings.click_action and getgenv().aim_settings.click_action_key and getgenv().aim_settings.click_action_key ~= Enum.KeyCode.Unknown then
-        table.insert(entries, {
-            name = getBindDisplayName("click_action"),
-            keyCode = getgenv().aim_settings.click_action_key
-        })
+    addEntry("clickgui_enabled", getgenv().aim_settings.clickgui_bind, getgenv().aim_settings.clickgui_enabled)
+    addEntry("click_action", getgenv().aim_settings.click_action_key, getgenv().aim_settings.click_action)
+
+    for settingKey, keyCode in pairs(getgenv().aim_settings.hotkeys or {}) do
+        addEntry(settingKey, keyCode, getgenv().aim_settings[settingKey])
     end
 
     table.sort(entries, function(a, b)
@@ -2565,6 +3356,21 @@ local panelAnimationProgress = 0
 local panelOriginalPositions = {}
 local panelTargetPositions = {}
 
+local function setPanelTopLeftLayout(panel, originalPosition)
+    panel.frame.AnchorPoint = Vector2.new(0, 0)
+    panel.frame.Position = originalPosition
+end
+
+local function setPanelCenteredLayout(panel, originalPosition)
+    panel.frame.AnchorPoint = Vector2.new(0.5, 0.5)
+    panel.frame.Position = UDim2.new(
+        originalPosition.X.Scale,
+        originalPosition.X.Offset + panel.width / 2,
+        originalPosition.Y.Scale,
+        originalPosition.Y.Offset + panel.frame.Size.Y.Offset / 2
+    )
+end
+
 -- Функция для анимации панелей
 local function animatePanels(show)
     if show then
@@ -2592,6 +3398,12 @@ local function updatePanelAnimation(deltaTime)
         if panelAnimationProgress >= 1 then
             panelAnimationProgress = 1
             panelAnimationState = "visible"
+            for i, panel in ipairs(State.panels) do
+                setPanelTopLeftLayout(panel, panelOriginalPositions[i])
+                panel.uiScale.Scale = 1
+                panel.frame.BackgroundTransparency = 0
+            end
+            return
         end
         
         if animationMode == "First" then
@@ -2625,7 +3437,7 @@ local function updatePanelAnimation(deltaTime)
             -- Анимация увеличения с центра
             for i, panel in ipairs(State.panels) do
                 -- Устанавливаем AnchorPoint для режима Two (центр)
-                panel.frame.AnchorPoint = Vector2.new(0.5, 0.5)
+                setPanelCenteredLayout(panel, panelOriginalPositions[i])
                 
                 local delay = (i - 1) * 0.08 -- Задержка между панелями
                 local adjustedProgress = math.max(0, math.min(1, (panelAnimationProgress - delay) / (1 - delay)))
@@ -2647,14 +3459,7 @@ local function updatePanelAnimation(deltaTime)
                 panel.uiScale.Scale = scale
                 panel.frame.BackgroundTransparency = math.max(0, 1 - easedProgress * 2)
                 
-                -- Используем оригинальную позицию и просто добавляем половину размера
-                -- Не используем AbsoluteSize чтобы избежать дёргания
-                panel.frame.Position = UDim2.new(
-                    panelOriginalPositions[i].X.Scale,
-                    panelOriginalPositions[i].X.Offset + panel.width / 2,
-                    panelOriginalPositions[i].Y.Scale,
-                    panelOriginalPositions[i].Y.Offset
-                )
+                setPanelCenteredLayout(panel, panelOriginalPositions[i])
             end
         end
         
@@ -2698,7 +3503,7 @@ local function updatePanelAnimation(deltaTime)
             -- Анимация уменьшения в центр с исчезновением
             for i, panel in ipairs(State.panels) do
                 -- Устанавливаем AnchorPoint для режима Two (центр)
-                panel.frame.AnchorPoint = Vector2.new(0.5, 0.5)
+                setPanelCenteredLayout(panel, panelOriginalPositions[i])
                 
                 local delay = (i - 1) * 0.08 -- Задержка между панелями
                 local adjustedProgress = math.max(0, math.min(1, (panelAnimationProgress - delay) / (1 - delay)))
@@ -2719,13 +3524,7 @@ local function updatePanelAnimation(deltaTime)
                 
                 panel.uiScale.Scale = scale
                 
-                -- Используем оригинальную позицию и просто добавляем половину размера
-                panel.frame.Position = UDim2.new(
-                    panelOriginalPositions[i].X.Scale,
-                    panelOriginalPositions[i].X.Offset + panel.width / 2,
-                    panelOriginalPositions[i].Y.Scale,
-                    panelOriginalPositions[i].Y.Offset
-                )
+                setPanelCenteredLayout(panel, panelOriginalPositions[i])
                 
                 -- Плавное исчезновение после уменьшения
                 if easedProgress > 0.6 then
@@ -2745,6 +3544,7 @@ local mAimbot = pCombat:addModule("Aimbot", "enabled", true)
 pCombat:addBoolean(mAimbot, "Prediction", "prediction_enabled")
 pCombat:addBoolean(mAimbot, "Lock Target", "lock_player")
 pCombat:addBoolean(mAimbot, "WallCheck", "wall_check")
+pCombat:addBoolean(mAimbot, "Ignore Team", "ignore_team")
 pCombat:addBoolean(mAimbot, "Smooth", "smooth_enabled")
 pCombat:addBoolean(mAimbot, "Noise", "noise_enabled")
 pCombat:addBoolean(mAimbot, "Speed Display", "speed_display")
@@ -2767,8 +3567,15 @@ table.insert(State.panels, pCombat)
 -- 2. VISUALS
 local pVisuals = CategoryPanel.new("Visuals", startX + panelW + gap, 50, panelW)
 local mESP = pVisuals:addModule("Player ESP", "esp_enabled", true)
-pVisuals:addDropdown(mESP, "ESP Mode", "esp_mode", {"White", "Black"})
 pVisuals:addBoolean(mESP, "Chams", "esp_chams")
+pVisuals:addBoolean(mESP, "Chams Outline", "esp_chams_outline")
+pVisuals:addColorPicker(mESP, "Chams Color", "esp_chams_color")
+pVisuals:addBoolean(mESP, "NameTags", "esp_nametags")
+pVisuals:addBoolean(mESP, "HP Bar", "esp_hp_bar")
+pVisuals:addBoolean(mESP, "Tool", "esp_tool")
+pVisuals:addBoolean(mESP, "Distance", "esp_distance")
+pVisuals:addBoolean(mESP, "Hide Team", "esp_hide_team")
+pVisuals:addBoolean(mESP, "Team Color", "esp_team_color")
 local mTargetESP = pVisuals:addModule("Target ESP", "target_esp", true)
 pVisuals:addDropdown(mTargetESP, "Mode", "target_esp_mode", {"Crosshair", "Circle"})
 pVisuals:addModule("Target HUD", "target_hud", false)
@@ -2779,9 +3586,29 @@ pVisuals:addModule("Friend Markers", "friend_markers", false)
 local mHUD = pVisuals:addModule("HUD", "hud_enabled", true)
 pVisuals:addBoolean(mHUD, "Watermark", "watermark_enabled")
 pVisuals:addBoolean(mHUD, "Keybind List", "keybind_list_enabled")
+pVisuals:addBoolean(mHUD, "Player Info", "player_info_enabled")
 pVisuals:addColorPicker(mHUD, "Client Color", "client_color")
 pVisuals:addModule("Rainbow FOV", "rainbow_fov", false)
 pVisuals:addModule("Rainbow Crosshair", "rainbow_crosshair", false)
+local mWorldTweaks = pVisuals:addModule("World Tweaks", "world_tweaks_enabled", true)
+pVisuals:addDropdown(mWorldTweaks, "Sky Preset", "world_sky", {"Default", "Day", "Sunset", "Night", "Void", "Candy", "Golden", "Blue", "Apricot", "Golden Hour", "Dream", "Aurora", "Arctic", "Rose", "Storm"})
+pVisuals:addSlider(mWorldTweaks, "Brightness", "world_brightness", 0, 5, 0.1)
+pVisuals:addSlider(mWorldTweaks, "Clock Time", "world_clock_time", 0, 24, 0.5)
+pVisuals:addSlider(mWorldTweaks, "Fog End", "world_fog_end", 200, 100000, 100)
+pVisuals:addBoolean(mWorldTweaks, "Shadows", "world_shadows_enabled")
+pVisuals:addColorPicker(mWorldTweaks, "Fog Color", "world_fog_color")
+pVisuals:addColorPicker(mWorldTweaks, "Ambient", "world_ambient")
+pVisuals:addColorPicker(mWorldTweaks, "Outdoor Ambient", "world_outdoor_ambient")
+pVisuals:addColorPicker(mWorldTweaks, "Shift Top", "world_color_shift_top")
+pVisuals:addColorPicker(mWorldTweaks, "Shift Bottom", "world_color_shift_bottom")
+pVisuals:addBoolean(mWorldTweaks, "Bloom", "world_bloom_enabled")
+pVisuals:addSlider(mWorldTweaks, "Bloom Intensity", "world_bloom_intensity", 0, 5, 0.1)
+pVisuals:addBoolean(mWorldTweaks, "Sun Rays", "world_sunrays_enabled")
+pVisuals:addSlider(mWorldTweaks, "Sun Rays Intensity", "world_sunrays_intensity", 0, 1, 0.05)
+pVisuals:addBoolean(mWorldTweaks, "Color Correction", "world_color_correction_enabled")
+pVisuals:addSlider(mWorldTweaks, "Saturation", "world_saturation", -1, 1, 0.05)
+pVisuals:addSlider(mWorldTweaks, "Contrast", "world_contrast", -1, 1, 0.05)
+pVisuals:addColorPicker(mWorldTweaks, "Tint Color", "world_tint_color")
 local mJumpCircle = pVisuals:addModule("Jump Circle", "jump_circle_enabled", true)
 pVisuals:addSlider(mJumpCircle, "Speed", "jump_circle_speed", 0.1, 2.0, 0.1)
 pVisuals:addSlider(mJumpCircle, "Size", "jump_circle_size", 0.5, 20.0, 0.1)
@@ -2791,7 +3618,7 @@ pVisuals:addDropdown(mClickGui, "Animation", "clickgui_animation", {"First", "Tw
 pVisuals:addBoolean(mClickGui, "Blur", "clickgui_blur")
 pVisuals:addBoolean(mClickGui, "Darken", "clickgui_darken")
 pVisuals:addBoolean(mClickGui, "Image", "clickgui_image")
-pVisuals:addDropdown(mClickGui, "Image Mode", "clickgui_image_mode", {"Vanilla", "Azuki", "mgebrat", "larp", "larp2", "trollface"})
+pVisuals:addDropdown(mClickGui, "Image Mode", "clickgui_image_mode", {"Vanilla", "Azuki", "mgebrat", "larp", "larp2", "trollface", "Rena", "renagif"})
 pVisuals:addBoolean(mClickGui, "Animate Trollface", "trollface_animate")
 pVisuals:addBoolean(mClickGui, "Trollface Music", "trollface_music")
 pVisuals:addSlider(mClickGui, "Music Volume", "trollface_volume", 0, 1, 0.1)
@@ -2813,12 +3640,30 @@ pMove:addDropdown(mInfJump, "Mode", "infinite_jump_mode", {"Default", "Platform"
 pMove:addSlider(mInfJump, "Jump Power", "infinite_jump_power", 10, 100, 1)
 pMove:addBoolean(mInfJump, "Bypass AntiCheat", "infinite_jump_bypass")
 pMove:addSlider(mInfJump, "Fall Speed Limit", "infinite_jump_fall_limit", 40, 120, 1)
-local mFreecam = pMove:addModule("Freecam", "freecam_enabled", true)
-pMove:addSlider(mFreecam, "Speed", "freecam_speed", 0.1, 5, 0.1)
+local mSpider = pMove:addModule("Spider", "spider_enabled", true)
+pMove:addDropdown(mSpider, "Mode", "spider_mode", {"Default", "Platform"})
+pMove:addBoolean(mSpider, "Bypass", "spider_bypass")
+pMove:addSlider(mSpider, "Fall Speed Limit", "spider_fall_limit", 40, 120, 1)
+local mAirStuck = pMove:addModule("Air Stuck", "air_stuck_enabled", false)
+local mSmoothFall = pMove:addModule("Smooth Fall", "smooth_fall_enabled", false)
+pMove:addSlider(mSmoothFall, "Fall Speed", "smooth_fall_speed", 10, 80, 1)
+pMove:addSlider(mSmoothFall, "Smoothness", "smooth_fall_smoothness", 0.1, 1.0, 0.05)
+local mSpeed = pMove:addModule("Speed", "speed_enabled", true)
+pMove:addSlider(mSpeed, "Speed", "speed_speed", 16, 60, 1)
+pMove:addBoolean(mSpeed, "Bypass", "speed_bypass")
+pMove:addSlider(mSpeed, "Jump Interval", "speed_jump_interval", 0.1, 1.0, 0.05)
+pMove:addModule("Safe Walk", "safe_walk_enabled", false)
+local mFly = pMove:addModule("Fly", "fly_enabled", true)
+pMove:addDropdown(mFly, "Mode", "fly_mode", {"Gyro", "CFrame", "Platform", "Velocity", "Tween"})
+pMove:addSlider(mFly, "Speed", "fly_speed", 0.1, 5, 0.1)
+pMove:addBoolean(mFly, "Bypass AntiCheat", "fly_bypass")
+pMove:addDropdown(mFly, "Bypass Mode", "fly_bypass_mode", {"Velocity", "Teleport", "Hybrid", "Jitter", "Smooth"})
 table.insert(State.panels, pMove)
 
 -- 4. MISC
 local pMisc = CategoryPanel.new("Misc", startX + (panelW + gap)*3, 50, panelW)
+local mFreecam = pMisc:addModule("Freecam", "freecam_enabled", true)
+pMisc:addSlider(mFreecam, "Speed", "freecam_speed", 0.1, 5, 0.1)
 local mClickAction = pMisc:addModule("Friend Add/Rem", "click_action", false)
 pMisc:addModule("AntiFling", "anti_fling", false)
 pMisc:addModule("FullBright", "fullbright", false)
@@ -2870,9 +3715,15 @@ local function serializeConfigValue(value)
             b = value.B
         }
     elseif valueType == "EnumItem" then
+        -- Правильно сохраняем EnumType с префиксом "Enum."
+        local enumTypeStr = tostring(value.EnumType)
+        -- Если уже есть "Enum.", оставляем как есть, иначе добавляем
+        if not enumTypeStr:match("^Enum%.") then
+            enumTypeStr = "Enum." .. enumTypeStr
+        end
         return {
             __type = "EnumItem",
-            enumType = tostring(value.EnumType),
+            enumType = enumTypeStr,
             name = value.Name
         }
     elseif valueType == "table" then
@@ -2910,12 +3761,32 @@ local function snapshotConfigData()
     local runtimeData = {}
     local serializedData = {}
     
+    -- Отладочный вывод текущих hotkeys перед сохранением
+    print("[Config Save] Current hotkeys in aim_settings:")
+    for k, v in pairs(getgenv().aim_settings.hotkeys or {}) do
+        print("  -", k, ":", typeof(v), tostring(v))
+    end
+    
     for key, value in pairs(getgenv().aim_settings) do
         if key ~= "running" and key ~= "friends" and key ~= "config_name" then
             local serializedValue = serializeConfigValue(value)
             serializedData[key] = serializedValue
             runtimeData[key] = deserializeConfigValue(serializedValue)
         end
+    end
+    
+    -- Отладочный вывод hotkeys после сериализации
+    if serializedData.hotkeys then
+        print("[Config Save] Hotkeys after serialization:")
+        for k, v in pairs(serializedData.hotkeys) do
+            if type(v) == "table" then
+                print("  -", k, ":", v.__type or "table", "enumType:", v.enumType, "name:", v.name)
+            else
+                print("  -", k, ":", type(v), tostring(v))
+            end
+        end
+    else
+        print("[Config Save] WARNING: No hotkeys in serializedData!")
     end
     
     return runtimeData, serializedData
@@ -3025,7 +3896,29 @@ local function loadConfig(encodedName)
     -- Загружаем настройки
     for key, value in pairs(config.data) do
         if key == "hotkeys" then
-            getgenv().aim_settings.hotkeys = cloneHotkeys(value)
+            -- Правильно десериализуем hotkeys
+            local deserializedHotkeys = {}
+            for hotkeyKey, hotkeyValue in pairs(value) do
+                -- Если это уже EnumItem, используем как есть
+                if typeof(hotkeyValue) == "EnumItem" then
+                    deserializedHotkeys[hotkeyKey] = hotkeyValue
+                -- Если это таблица с __type, десериализуем
+                elseif type(hotkeyValue) == "table" and hotkeyValue.__type == "EnumItem" then
+                    local enumTypeName = tostring(hotkeyValue.enumType or ""):match("^Enum%.(.+)$")
+                    local enumObject = enumTypeName and Enum[enumTypeName]
+                    deserializedHotkeys[hotkeyKey] = (enumObject and enumObject[hotkeyValue.name]) or Enum.KeyCode.Unknown
+                -- Если это строка, пытаемся конвертировать
+                elseif type(hotkeyValue) == "string" then
+                    local keyName = hotkeyValue:match("^Enum%.KeyCode%.(.+)$") or hotkeyValue
+                    deserializedHotkeys[hotkeyKey] = Enum.KeyCode[keyName] or Enum.KeyCode.Unknown
+                else
+                    deserializedHotkeys[hotkeyKey] = Enum.KeyCode.Unknown
+                end
+            end
+            getgenv().aim_settings.hotkeys = deserializedHotkeys
+        elseif key == "clickgui_bind" then
+            -- НЕ загружаем clickgui_bind из конфига - оставляем текущий
+            -- Пропускаем этот ключ
         elseif getgenv().aim_settings[key] ~= nil then
             getgenv().aim_settings[key] = value
         end
@@ -3152,17 +4045,78 @@ loadConfig = function(encodedName)
     
     local config = configList[encodedName]
     local function normalizeSingleKeyCode(value, fallback)
-        local wrapped = cloneHotkeys({ __value = value })
-        return wrapped.__value or fallback or Enum.KeyCode.Unknown
+        -- Отладка входного значения
+        local valueType = type(value)
+        local valueTypeof = typeof(value)
+        print("[Normalize] Input type:", valueType, "typeof:", valueTypeof, "value:", tostring(value))
+        
+        -- Если это userdata и typeof говорит что EnumItem
+        if valueTypeof == "EnumItem" then
+            print("[Normalize] Already EnumItem:", tostring(value))
+            -- Проверяем, не Unknown ли это уже
+            if value == Enum.KeyCode.Unknown then
+                print("[Normalize] WARNING: Value is already Unknown!")
+            end
+            return value
+        elseif valueType == "table" and value.__type == "EnumItem" then
+            print("[Normalize] Table with __type=EnumItem")
+            print("[Normalize] enumType:", value.enumType, "name:", value.name)
+            local enumTypeName = tostring(value.enumType or ""):match("^Enum%.(.+)$")
+            print("[Normalize] Extracted enumType:", enumTypeName)
+            if not enumTypeName then
+                print("[Normalize] ERROR: Could not extract enumType!")
+                return fallback or Enum.KeyCode.Unknown
+            end
+            local enumObject = Enum[enumTypeName]
+            if not enumObject then
+                print("[Normalize] ERROR: Enum object not found for:", enumTypeName)
+                return fallback or Enum.KeyCode.Unknown
+            end
+            local result = enumObject[value.name]
+            if not result then
+                print("[Normalize] ERROR: KeyCode not found:", value.name)
+                return fallback or Enum.KeyCode.Unknown
+            end
+            print("[Normalize] Result:", tostring(result))
+            return result
+        elseif valueType == "string" then
+            local keyName = value:match("^Enum%.KeyCode%.(.+)$") or value
+            print("[Normalize] String keyName:", keyName)
+            return Enum.KeyCode[keyName] or fallback or Enum.KeyCode.Unknown
+        end
+        print("[Normalize] Fallback used, unknown type")
+        return fallback or Enum.KeyCode.Unknown
     end
-    getgenv().aim_settings.hotkeys = cloneHotkeys(config.data.hotkeys or {})
+    
+    -- Правильно десериализуем hotkeys
+    local deserializedHotkeys = {}
+    local hotkeyCount = 0
+    
+    print("[Config Load] Raw hotkeys data:", type(config.data.hotkeys))
+    for hotkeyKey, hotkeyValue in pairs(config.data.hotkeys or {}) do
+        print("[Config Load] ========== Processing hotkey:", hotkeyKey, "==========")
+        local normalizedKey = normalizeSingleKeyCode(hotkeyValue, Enum.KeyCode.Unknown)
+        deserializedHotkeys[hotkeyKey] = normalizedKey
+        hotkeyCount = hotkeyCount + 1
+        print("[Config Load] Final result for", hotkeyKey, "=", tostring(normalizedKey))
+    end
+    getgenv().aim_settings.hotkeys = deserializedHotkeys
+    
+    -- Отладочный вывод всех загруженных hotkeys
+    print("[Config Load] ========== SUMMARY ==========")
+    print("[Config Load] Total hotkeys loaded:", hotkeyCount)
+    for k, v in pairs(deserializedHotkeys) do
+        print("  -", k, ":", tostring(v))
+    end
+    
     for key, value in pairs(config.data) do
         if key == "hotkeys" then
             -- already restored above
         elseif key == "click_action_key" then
             getgenv().aim_settings.click_action_key = normalizeSingleKeyCode(value, getgenv().aim_settings.click_action_key)
         elseif key == "clickgui_bind" then
-            getgenv().aim_settings.clickgui_bind = normalizeSingleKeyCode(value, getgenv().aim_settings.clickgui_bind)
+            -- НЕ загружаем clickgui_bind из конфига - оставляем текущий
+            -- Пропускаем этот ключ
         elseif getgenv().aim_settings[key] ~= nil then
             getgenv().aim_settings[key] = value
         end
@@ -3777,7 +4731,7 @@ if not getgenv().freecam_data then
     getgenv().freecam_data = {cframe = nil, original_type = nil, char_anchored = false}
 end
 
-G.RS.RenderStepped:Connect(function()
+State.connections.freecam = G.RS.RenderStepped:Connect(function()
     local fc = getgenv().freecam_data
     if not getgenv().aim_settings.freecam_enabled then
         if fc.original_type then
@@ -3831,112 +4785,84 @@ G.RS.RenderStepped:Connect(function()
     G.Cam.CFrame = fc.cframe
 end)
 
-G.RS.RenderStepped:Connect(function()
+State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
     if not getgenv().aim_settings.running then return end
     
-    local currentTime = tick()
-    local deltaTime = currentTime - renderState.lastFrameTime
-    renderState.lastFrameTime = currentTime
+    local t = tick()
+    local dt = t - renderState.lastFrameTime
+    renderState.lastFrameTime = t
     
-    -- Обновляем анимацию панелей
-    updatePanelAnimation(deltaTime)
+    updatePanelAnimation(dt)
     
-    -- Обновляем цвета только при изменении client_color (оптимизировано)
-    if currentTime - lastColorCheck >= OPTIMIZATION.COLOR_CHECK_INTERVAL then
-        if getClientColor() ~= lastClientColor then
-            updateAllColors()
-        end
-        lastColorCheck = currentTime
+    if t - lastColorCheck >= OPTIMIZATION.COLOR_CHECK_INTERVAL then
+        if getClientColor() ~= lastClientColor then updateAllColors() end
+        lastColorCheck = t
     end
     
-    -- Update hitboxes (оптимизировано - 30 FPS вместо 60+)
-    if currentTime - lastHitboxUpdate >= OPTIMIZATION.HITBOX_UPDATE_INTERVAL then
+    if t - lastHitboxUpdate >= OPTIMIZATION.HITBOX_UPDATE_INTERVAL then
         updateHitboxes()
-        lastHitboxUpdate = currentTime
+        lastHitboxUpdate = t
     end
     
-    -- Update TP Walk
     updateTPWalk()
     
-    -- Update Infinite Jump (проверяем изменение состояния)
-    if getgenv().aim_settings.infinite_jump_enabled and not IJ.c then
+    local s = getgenv().aim_settings
+    if s.infinite_jump_enabled and not IJ.c then
         IJ_I()
-    elseif not getgenv().aim_settings.infinite_jump_enabled and IJ.c then
-        if IJ.c then
-            IJ.c:Disconnect()
-            IJ.c = nil
-        end
+    elseif not s.infinite_jump_enabled and IJ.c then
+        if IJ.c then IJ.c:Disconnect() IJ.c = nil end
         IJ_CP()
     end
     
-    -- Update State.panels (только если GUI открыт)
     if ScreenGui.Enabled then
-        for _, panel in ipairs(State.panels) do
-            panel:update()
-        end
+        for _, panel in ipairs(State.panels) do panel:update() end
     end
     
-    -- Update GUI visibility
     updateGUIVisibility()
     
-    -- Update TargetHud dragging
     if targetHudDragging then
-        local mouse = G.UIS:GetMouseLocation()
-        local delta = Vector2.new(mouse.X - targetHudDragStart.X, mouse.Y - targetHudDragStart.Y)
+        local m = G.UIS:GetMouseLocation()
+        local d = Vector2.new(m.X - targetHudDragStart.X, m.Y - targetHudDragStart.Y)
         TargetHudFrame.Position = UDim2.new(
             0,
             targetHudStartPos.X.Offset + delta.X,
             0,
-            targetHudStartPos.Y.Offset + delta.Y
+            targetHudStartPos.Y.Offset + d.Y
         )
     end
     
-    -- Rainbow FOV
-    if getgenv().aim_settings.rainbow_fov then
+    if s.rainbow_fov then
         renderState.hue = renderState.hue + 0.005
         FOVCircle.Color = Color3.fromHSV(renderState.hue % 1, 0.7, 1)
     else
         FOVCircle.Color = getClientColor()
     end
     
-    -- Rainbow Crosshair (цвет будет применяться к BillboardGui крестику)
-    
-    -- Target ESP Rotation Animation
-    targetRotation = targetRotation + (3 * rotationDirection)
-    if targetRotation >= 359 then
-        rotationDirection = -1
-    elseif targetRotation <= -359 then
-        rotationDirection = 1
+    State.targetRotation = State.targetRotation + (3 * State.rotationDirection)
+    if State.targetRotation >= 359 then
+        State.rotationDirection = -1
+    elseif State.targetRotation <= -359 then
+        State.rotationDirection = 1
     end
     
-    -- FOV Circle
-    FOVCircle.Visible = getgenv().aim_settings.enabled
-    FOVCircle.Radius = getgenv().aim_settings.fov
+    FOVCircle.Visible = s.enabled
+    FOVCircle.Radius = s.fov
     FOVCircle.Position = G.UIS:GetMouseLocation()
     
-    -- Target ESP (создается на игроке через BillboardGui)
     for _, p in pairs(G.Plr:GetPlayers()) do
         if p ~= G.LP and p.Character then
-            -- Определяем часть тела для Target ESP в зависимости от hitbox
-            local targetPart
-            if getgenv().aim_settings.hitbox == "Head" then
-                targetPart = p.Character:FindFirstChild("Head")
-            else
-                targetPart = p.Character:FindFirstChild("UpperTorso") or p.Character:FindFirstChild("Torso")
-            end
+            local tp = s.hitbox == "Head" and p.Character:FindFirstChild("Head") or (p.Character:FindFirstChild("UpperTorso") or p.Character:FindFirstChild("Torso"))
+            local h = p.Character:FindFirstChild("Head")
             
-            local head = p.Character:FindFirstChild("Head")
-            if targetPart then
-                local targetESP = targetPart:FindFirstChild("Y_Target_ESP")
+            if tp then
+                local te = tp:FindFirstChild("Y_Target_ESP")
                 
-                -- Показываем ESP только на заблокированной цели
-                if getgenv().aim_settings.target_esp and State.LockedTarget and State.LockedTarget.Parent == p.Character then
-                    if not targetESP then
-                        -- Создаем BillboardGui для Target ESP
-                        targetESP = Instance.new("BillboardGui", targetPart)
-                        targetESP.Name = "Y_Target_ESP"
-                        targetESP.Size = UDim2.new(0, 100, 0, 100)
-                        targetESP.StudsOffset = Vector3.new(0, 0, 0)
+                if s.target_esp and State.LockedTarget and State.LockedTarget.Parent == p.Character then
+                    if not te then
+                        te = Instance.new("BillboardGui", tp)
+                        te.Name = "Y_Target_ESP"
+                        te.Size = UDim2.new(0, 100, 0, 100)
+                        te.StudsOffset = Vector3.new(0, 0, 0)
                         targetESP.AlwaysOnTop = true
                         
                         -- Контейнер для вращения
@@ -3984,57 +4910,46 @@ G.RS.RenderStepped:Connect(function()
                         
                         -- Добавляем UIGradient для эффекта градиента как в Квадрате
                         local circleGradient = Instance.new("UIGradient", circleImage)
-                        circleGradient.Name = "CircleGradient"
-                        circleGradient.Rotation = 0
-                        circleGradient.Color = ColorSequence.new({
+                        cg.Name = "CircleGradient"
+                        cg.Rotation = 0
+                        cg.Color = ColorSequence.new({
                             ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
                             ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
                         })
                     end
                     
-                    targetESP.Enabled = true
-                    local container = targetESP:FindFirstChild("Container")
+                    te.Enabled = true
+                    local c = te:FindFirstChild("Container")
                     
-                    if container then
-                        local gradientColor1
-                        local gradientColor2
-                        if getgenv().aim_settings.rainbow_crosshair then
+                    if c then
+                        local gc1, gc2
+                        if s.rainbow_crosshair then
                             renderState.crosshairHue = renderState.crosshairHue + 0.005
-                            gradientColor1 = Color3.fromHSV(renderState.crosshairHue % 1, 0.7, 1)
-                            gradientColor2 = Color3.fromHSV((renderState.crosshairHue + 0.25) % 1, 0.7, 1)
+                            gc1 = Color3.fromHSV(renderState.crosshairHue % 1, 0.7, 1)
+                            gc2 = Color3.fromHSV((renderState.crosshairHue + 0.25) % 1, 0.7, 1)
                         else
-                            local clientColor = getClientColor()
-                            gradientColor1 = tintColor(clientColor, 0.82, 0)
-                            gradientColor2 = tintColor(clientColor, 1, 0)
+                            local cc = getClientColor()
+                            gc1 = tintColor(cc, 0.82, 0)
+                            gc2 = tintColor(cc, 1, 0)
                         end
-                        local espGradient = ColorSequence.new({
-                            ColorSequenceKeypoint.new(0, gradientColor1),
-                            ColorSequenceKeypoint.new(1, gradientColor2)
-                        })
+                        local eg = ColorSequence.new({ColorSequenceKeypoint.new(0, gc1), ColorSequenceKeypoint.new(1, gc2)})
 
-                        -- Переключение между режимами
-                        if getgenv().aim_settings.target_esp_mode == "Circle" then
-                            -- Circle Mode
-                            container.LineH.Visible = false
-                            container.LineV.Visible = false
-                            container.CircleImage.Visible = true
+                        if s.target_esp_mode == "Circle" then
+                            c.LineH.Visible = false
+                            c.LineV.Visible = false
+                            c.CircleImage.Visible = true
+                            c.Rotation = math.sin(tick() / 1.0) * 360
                             
-                            -- Вращение картинки как в режиме Квадрат (используем sin для плавности)
-                            local sin = math.sin(tick() / 1.0)
-                            container.Rotation = sin * 360
-                            
-                            -- Применяем градиентные цвета как в Квадрате
-                            local gradient = container.CircleImage:FindFirstChild("CircleGradient")
-                            if gradient then
-                                gradient.Color = espGradient
-                                container.CircleImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
+                            local g = c.CircleImage:FindFirstChild("CircleGradient")
+                            if g then
+                                g.Color = eg
+                                c.CircleImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
                             end
                         else
-                            -- Crosshair Mode
-                            container.LineH.Visible = true
-                            container.LineV.Visible = true
-                            container.CircleImage.Visible = false
-                            container.Rotation = 0
+                            c.LineH.Visible = true
+                            c.LineV.Visible = true
+                            c.CircleImage.Visible = false
+                            c.Rotation = 0
 
                             container.LineH.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                             container.LineV.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
@@ -4075,14 +4990,42 @@ G.RS.RenderStepped:Connect(function()
         if p ~= G.LP and p.Character then
             local isFriendPlayer = isFriend(p.Name)
             
-            -- Highlight (подсветка игрока)
+            -- Проверка Hide Team
+            local shouldHide = false
+            if getgenv().aim_settings.esp_hide_team then
+                if G.LP.Team and p.Team == G.LP.Team then
+                    shouldHide = true
+                end
+            end
+            
+            -- Определяем цвет ESP
+            local espColor
+            if getgenv().aim_settings.esp_team_color and p.Team then
+                espColor = p.Team.TeamColor.Color
+            else
+                espColor = Color3.fromRGB(255, 255, 255) -- Белый по умолчанию
+            end
+            
+            -- Highlight (подсветка игрока) - Chams
             local hl = p.Character:FindFirstChild("Y_ESP") or Instance.new("Highlight", p.Character)
             hl.Name = "Y_ESP"
-            hl.Enabled = getgenv().aim_settings.esp_enabled
-            local color = (getgenv().aim_settings.esp_mode == "White" and Color3.new(1,1,1) or Color3.new(0,0,0))
-            hl.FillColor = color
-            hl.OutlineColor = (getgenv().aim_settings.esp_mode == "White" and Color3.new(0,0,0) or Color3.new(1,1,1))
+            hl.Enabled = getgenv().aim_settings.esp_enabled and getgenv().aim_settings.esp_chams and not shouldHide
+            
+            -- Chams настройки
+            if getgenv().aim_settings.esp_team_color and p.Team then
+                hl.FillColor = p.Team.TeamColor.Color
+            else
+                hl.FillColor = getgenv().aim_settings.esp_chams_color
+            end
             hl.FillTransparency = 0.5
+            
+            -- Chams Outline
+            if getgenv().aim_settings.esp_chams_outline then
+                hl.OutlineColor = Color3.new(0, 0, 0)
+                hl.OutlineTransparency = 0
+            else
+                hl.OutlineTransparency = 1
+            end
             
             -- ESP Text Info
             local head = p.Character:FindFirstChild("Head")
@@ -4097,8 +5040,14 @@ G.RS.RenderStepped:Connect(function()
                     billboardGui.AlwaysOnTop = true
                 end
                 
-                -- Текст показывается только когда ESP включен И Chams выключен
-                billboardGui.Enabled = getgenv().aim_settings.esp_enabled and not getgenv().aim_settings.esp_chams
+                -- Проверяем нужно ли показывать хоть один элемент текста
+                local shouldShowText = getgenv().aim_settings.esp_nametags or 
+                                      getgenv().aim_settings.esp_hp_bar or 
+                                      getgenv().aim_settings.esp_tool or 
+                                      getgenv().aim_settings.esp_distance
+                
+                -- Текст показывается только когда ESP включен И не скрыт командой И включен хоть один элемент
+                billboardGui.Enabled = getgenv().aim_settings.esp_enabled and not shouldHide and shouldShowText
                 
                 -- Создаем или находим TextLabel
                 local textLabel = billboardGui:FindFirstChild("TextLabel")
@@ -4112,13 +5061,45 @@ G.RS.RenderStepped:Connect(function()
                     textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
                 end
                 
-                -- Обновляем текст
+                -- Обновляем текст с учётом настроек
                 local hum = p.Character:FindFirstChildOfClass("Humanoid")
                 if hum and G.Cam and G.Cam.CFrame then
-                    local distance = math.floor((head.Position - G.Cam.CFrame.Position).Magnitude)
-                    local health = math.floor(hum.Health)
-                    local maxHealth = math.floor(hum.MaxHealth)
-                    textLabel.Text = p.Name .. "\n" .. health .. "/" .. maxHealth .. " HP\n" .. distance .. " studs"
+                    local textParts = {}
+                    
+                    -- NameTag
+                    if getgenv().aim_settings.esp_nametags then
+                        table.insert(textParts, p.Name)
+                    end
+                    
+                    -- HP Bar
+                    if getgenv().aim_settings.esp_hp_bar then
+                        local health = math.floor(hum.Health)
+                        local maxHealth = math.floor(hum.MaxHealth)
+                        table.insert(textParts, health .. "/" .. maxHealth .. " HP")
+                    end
+                    
+                    -- Tool
+                    if getgenv().aim_settings.esp_tool then
+                        local tool = p.Character:FindFirstChildOfClass("Tool")
+                        if tool then
+                            table.insert(textParts, "[" .. tool.Name .. "]")
+                        end
+                    end
+                    
+                    -- Distance
+                    if getgenv().aim_settings.esp_distance then
+                        local distance = math.floor((head.Position - G.Cam.CFrame.Position).Magnitude)
+                        table.insert(textParts, distance .. " studs")
+                    end
+                    
+                    textLabel.Text = table.concat(textParts, "\n")
+                    
+                    -- Цвет текста в зависимости от Team Color
+                    if getgenv().aim_settings.esp_team_color and p.Team then
+                        textLabel.TextColor3 = p.Team.TeamColor.Color
+                    else
+                        textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    end
                 end
                 
                 -- Friend Marker (как в Sims - зеленый ромб над головой)
@@ -4176,14 +5157,52 @@ G.RS.RenderStepped:Connect(function()
         SpeedLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
     end
     
+    -- Player Info Display (скорость локального игрока)
+    PlayerInfoLabel.Visible = getgenv().aim_settings.hud_enabled and getgenv().aim_settings.player_info_enabled
+    if getgenv().aim_settings.hud_enabled and getgenv().aim_settings.player_info_enabled then
+        local character = G.LP.Character
+        if character then
+            local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            
+            if humanoidRootPart and humanoid and humanoid.Health > 0 then
+                local velocity = humanoidRootPart.Velocity
+                local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+                local speed = math.floor(horizontalVelocity.Magnitude * 10) / 10
+                
+                -- Форматируем текст с информацией
+                PlayerInfoLabel.Text = string.format("Speed: %.1f studs/s\nHP: %d/%d", 
+                    speed, 
+                    math.floor(humanoid.Health), 
+                    math.floor(humanoid.MaxHealth)
+                )
+                
+                -- Цвет зависит от скорости
+                if speed > 20 then
+                    PlayerInfoLabel.TextColor3 = Color3.fromRGB(100, 255, 100) -- Зеленый
+                elseif speed > 10 then
+                    PlayerInfoLabel.TextColor3 = Color3.fromRGB(255, 255, 100) -- Желтый
+                else
+                    PlayerInfoLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- Белый
+                end
+            else
+                PlayerInfoLabel.Text = "Speed: N/A\nHP: N/A"
+                PlayerInfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+            end
+        else
+            PlayerInfoLabel.Text = "Speed: N/A\nHP: N/A"
+            PlayerInfoLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        end
+    end
+    
     -- Keybind List Display
     KeybindList.Visible = getgenv().aim_settings.hud_enabled and getgenv().aim_settings.keybind_list_enabled
     if getgenv().aim_settings.hud_enabled and getgenv().aim_settings.keybind_list_enabled then
         -- Удаляем старые элементы
-        for _, item in pairs(keybindItems) do
+        for _, item in pairs(State.keybindItems) do
             if item then item:Destroy() end
         end
-        keybindItems = {}
+        State.keybindItems = {}
         
         local orderIndex = 3
         local bindEntries = getVisibleKeybindEntries()
@@ -4195,6 +5214,7 @@ G.RS.RenderStepped:Connect(function()
                 item.Size = UDim2.new(1, -16, 0, 20)
                 item.BackgroundTransparency = 1
                 item.LayoutOrder = orderIndex
+                item.ZIndex = 100
                 orderIndex = orderIndex + 1
                 
                 local nameLbl = Instance.new("TextLabel", item)
@@ -4206,6 +5226,7 @@ G.RS.RenderStepped:Connect(function()
                 nameLbl.Font = Enum.Font.Gotham
                 nameLbl.TextSize = 11
                 nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+                nameLbl.ZIndex = 101
                 
                 local keyLbl = Instance.new("TextLabel", item)
                 keyLbl.Size = UDim2.new(0.4, 0, 1, 0)
@@ -4216,8 +5237,20 @@ G.RS.RenderStepped:Connect(function()
                 keyLbl.Font = Enum.Font.GothamBold
                 keyLbl.TextSize = 11
                 keyLbl.TextXAlignment = Enum.TextXAlignment.Right
-                
-                table.insert(keybindItems, item)
+                keyLbl.ZIndex = 101
+
+                local stateLbl = Instance.new("TextLabel", item)
+                stateLbl.Size = UDim2.new(0, 34, 1, 0)
+                stateLbl.Position = UDim2.new(1, -70, 0, 0)
+                stateLbl.BackgroundTransparency = 1
+                stateLbl.Text = bindEntry.active and "ON" or "OFF"
+                stateLbl.TextColor3 = bindEntry.active and Color3.fromRGB(90, 210, 120) or THEME.TEXT_DIM
+                stateLbl.Font = Enum.Font.GothamBold
+                stateLbl.TextSize = 10
+                stateLbl.TextXAlignment = Enum.TextXAlignment.Right
+                stateLbl.ZIndex = 101
+
+                table.insert(State.keybindItems, item)
             end
         end
         
@@ -4333,46 +5366,46 @@ G.RS.RenderStepped:Connect(function()
         local dt = G.RS.RenderStepped:Wait()
         
         -- Обновляем FPS и Ping раз в секунду
-        if currentTime - lastUpdateTime >= 1.0 then
-            lastUpdateTime = currentTime
+        if currentTime - State.watermark.lastUpdateTime >= 1.0 then
+            State.watermark.lastUpdateTime = currentTime
             
             -- Получаем новые значения
             local newFPS = math.floor(1 / dt)
             local newPing = math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
             
             -- Запускаем анимацию только если значения изменились
-            if newFPS ~= currentFPS then
-                currentFPS = newFPS
-                fpsAnimProgress = 0
+            if newFPS ~= State.watermark.currentFPS then
+                State.watermark.currentFPS = newFPS
+                State.watermark.fpsAnimProgress = 0
             end
             
-            if newPing ~= currentPing then
-                currentPing = newPing
-                pingAnimProgress = 0
+            if newPing ~= State.watermark.currentPing then
+                State.watermark.currentPing = newPing
+                State.watermark.pingAnimProgress = 0
             end
         end
         
         -- Обновляем прогресс анимации (быстро в начале, медленно в конце)
         local animSpeed = 3.0 -- Скорость анимации
-        if fpsAnimProgress < 1 then
-            fpsAnimProgress = math.min(fpsAnimProgress + dt * animSpeed, 1)
+        if State.watermark.fpsAnimProgress < 1 then
+            State.watermark.fpsAnimProgress = math.min(State.watermark.fpsAnimProgress + dt * animSpeed, 1)
         end
-        if pingAnimProgress < 1 then
-            pingAnimProgress = math.min(pingAnimProgress + dt * animSpeed, 1)
+        if State.watermark.pingAnimProgress < 1 then
+            State.watermark.pingAnimProgress = math.min(State.watermark.pingAnimProgress + dt * animSpeed, 1)
         end
         
         -- Анимируем отображаемые значения
-        displayFPS = animateNumber(displayFPS, currentFPS, fpsAnimProgress)
-        displayPing = animateNumber(displayPing, currentPing, pingAnimProgress)
+        State.watermark.displayFPS = animateNumber(State.watermark.displayFPS, State.watermark.currentFPS, State.watermark.fpsAnimProgress)
+        State.watermark.displayPing = animateNumber(State.watermark.displayPing, State.watermark.currentPing, State.watermark.pingAnimProgress)
         
         -- Обновляем текст с анимированными значениями
-        FPSLabel.Text = displayFPS .. "fps"
-        PingLabel.Text = displayPing .. "ms"
+        FPSLabel.Text = State.watermark.displayFPS .. "fps"
+        PingLabel.Text = State.watermark.displayPing .. "ms"
         
         -- Вращающийся градиент
         local rotationSpeed = 30
-        watermarkRotation = (watermarkRotation + rotationSpeed * dt) % 360
-        clientGradient.Rotation = watermarkRotation
+        State.watermark.rotation = (State.watermark.rotation + rotationSpeed * dt) % 360
+        clientGradient.Rotation = State.watermark.rotation
         
         -- Динамический цвет градиента
         local baseColor = getClientColor()
@@ -4398,7 +5431,7 @@ G.RS.RenderStepped:Connect(function()
                                 humanoid:GetState() == Enum.HumanoidStateType.Freefall
                 
                 local playerKey = player.Name
-                local wasJumping = lastJumpState[playerKey] or false
+                local wasJumping = State.lastJumpState[playerKey] or false
                 
                 -- Если игрок только что начал прыгать
                 if isJumping and not wasJumping then
@@ -4453,7 +5486,7 @@ G.RS.RenderStepped:Connect(function()
                             phase = "appearing"
                         }
                         
-                        table.insert(jumpCircles, circle)
+                        table.insert(State.jumpCircles, circle)
                     else
                         -- Если земля не найдена, создаем круг под ногами игрока как fallback
                         local circlePart = Instance.new("Part", workspace)
@@ -4494,20 +5527,20 @@ G.RS.RenderStepped:Connect(function()
                             phase = "appearing"
                         }
                         
-                        table.insert(jumpCircles, circle)
+                        table.insert(State.jumpCircles, circle)
                     end
                 end
                 
-                lastJumpState[playerKey] = isJumping
+                State.lastJumpState[playerKey] = isJumping
             end
         else
             -- Игрок покинул игру, очищаем состояние
-            lastJumpState[player.Name] = nil
+            State.lastJumpState[player.Name] = nil
         end
         
         -- Обновляем существующие круги
-        for i = #jumpCircles, 1, -1 do
-            local circle = jumpCircles[i]
+        for i = #State.jumpCircles, 1, -1 do
+            local circle = State.jumpCircles[i]
             local currentTime = tick()
             local elapsed = currentTime - circle.startTime
             local speed = getgenv().aim_settings.jump_circle_speed
@@ -4516,7 +5549,7 @@ G.RS.RenderStepped:Connect(function()
             -- Проверяем что игрок и части еще существуют
             if not circle.player.Character or not circle.circlePart or not circle.circlePart.Parent then
                 if circle.circlePart then circle.circlePart:Destroy() end
-                table.remove(jumpCircles, i)
+                table.remove(State.jumpCircles, i)
             else
                 local imageLabel = circle.imageLabel
                 if imageLabel then
@@ -4556,24 +5589,24 @@ G.RS.RenderStepped:Connect(function()
                     else
                         -- Анимация завершена, удаляем круг
                         circle.circlePart:Destroy()
-                        table.remove(jumpCircles, i)
+                        table.remove(State.jumpCircles, i)
                     end
                 else
                     -- ImageLabel не найден, удаляем круг
                     circle.circlePart:Destroy()
-                    table.remove(jumpCircles, i)
+                    table.remove(State.jumpCircles, i)
                 end
             end
         end
     else
         -- JumpCircle выключен, очищаем все круги
-        for i = #jumpCircles, 1, -1 do
-            local circle = jumpCircles[i]
+        for i = #State.jumpCircles, 1, -1 do
+            local circle = State.jumpCircles[i]
             if circle.circlePart then circle.circlePart:Destroy() end
-            table.remove(jumpCircles, i)
+            table.remove(State.jumpCircles, i)
         end
         -- Очищаем состояния прыжков
-        lastJumpState = {}
+        State.lastJumpState = {}
     end
     
     -- China Hat Logic
@@ -4828,84 +5861,123 @@ G.RS.RenderStepped:Connect(function()
         -- Image Effect
         if getgenv().aim_settings.clickgui_image and effectsActive then
             ClickGuiImage.Visible = true
+            ClickGuiImage.ScaleType = Enum.ScaleType.Stretch
+            ClickGuiImage.Size = UDim2.new(0, 280, 0, 460)
+            ClickGuiImage.Position = UDim2.new(1, -300, 1, -450)
             
             -- Обновляем картинку в зависимости от режима
             if getgenv().aim_settings.clickgui_image_mode == "Vanilla" then
                 ClickGuiImage.Image = "http://www.roblox.com/asset/?id=7331776965"
                 -- Сбрасываем trollface анимацию и музыку
-                if trollfaceOriginalPosition then
-                    ClickGuiImage.Position = trollfaceOriginalPosition
-                    trollfaceOriginalPosition = nil
+                if State.trollface.originalPosition then
+                    ClickGuiImage.Position = State.trollface.originalPosition
+                    State.trollface.originalPosition = nil
                 end
-                if trollfaceMusic then
-                    trollfaceMusic:Stop()
-                    trollfaceMusic:Destroy()
-                    trollfaceMusic = nil
+                if State.trollface.music then
+                    State.trollface.music:Stop()
+                    State.trollface.music:Destroy()
+                    State.trollface.music = nil
                 end
             elseif getgenv().aim_settings.clickgui_image_mode == "Azuki" then
                 ClickGuiImage.Image = "http://www.roblox.com/asset/?id=7331759194"
                 -- Сбрасываем trollface анимацию и музыку
-                if trollfaceOriginalPosition then
-                    ClickGuiImage.Position = trollfaceOriginalPosition
-                    trollfaceOriginalPosition = nil
+                if State.trollface.originalPosition then
+                    ClickGuiImage.Position = State.trollface.originalPosition
+                    State.trollface.originalPosition = nil
                 end
-                if trollfaceMusic then
-                    trollfaceMusic:Stop()
-                    trollfaceMusic:Destroy()
-                    trollfaceMusic = nil
+                if State.trollface.music then
+                    State.trollface.music:Stop()
+                    State.trollface.music:Destroy()
+                    State.trollface.music = nil
                 end
             elseif getgenv().aim_settings.clickgui_image_mode == "mgebrat" then
                 ClickGuiImage.Image = "rbxassetid://108286603977430"
                 -- Сбрасываем trollface анимацию и музыку
-                if trollfaceOriginalPosition then
-                    ClickGuiImage.Position = trollfaceOriginalPosition
-                    trollfaceOriginalPosition = nil
+                if State.trollface.originalPosition then
+                    ClickGuiImage.Position = State.trollface.originalPosition
+                    State.trollface.originalPosition = nil
                 end
-                if trollfaceMusic then
-                    trollfaceMusic:Stop()
-                    trollfaceMusic:Destroy()
-                    trollfaceMusic = nil
+                if State.trollface.music then
+                    State.trollface.music:Stop()
+                    State.trollface.music:Destroy()
+                    State.trollface.music = nil
                 end
             elseif getgenv().aim_settings.clickgui_image_mode == "larp" then
                 ClickGuiImage.Image = "rbxassetid://126488944636237"
                 -- Сбрасываем trollface анимацию и музыку
-                if trollfaceOriginalPosition then
-                    ClickGuiImage.Position = trollfaceOriginalPosition
-                    trollfaceOriginalPosition = nil
+                if State.trollface.originalPosition then
+                    ClickGuiImage.Position = State.trollface.originalPosition
+                    State.trollface.originalPosition = nil
                 end
-                if trollfaceMusic then
-                    trollfaceMusic:Stop()
-                    trollfaceMusic:Destroy()
-                    trollfaceMusic = nil
+                if State.trollface.music then
+                    State.trollface.music:Stop()
+                    State.trollface.music:Destroy()
+                    State.trollface.music = nil
                 end
             elseif getgenv().aim_settings.clickgui_image_mode == "larp2" then
                 ClickGuiImage.Image = "rbxassetid://112963740799060"
                 -- Сбрасываем trollface анимацию и музыку
-                if trollfaceOriginalPosition then
-                    ClickGuiImage.Position = trollfaceOriginalPosition
-                    trollfaceOriginalPosition = nil
+                if State.trollface.originalPosition then
+                    ClickGuiImage.Position = State.trollface.originalPosition
+                    State.trollface.originalPosition = nil
                 end
-                if trollfaceMusic then
-                    trollfaceMusic:Stop()
-                    trollfaceMusic:Destroy()
-                    trollfaceMusic = nil
+                if State.trollface.music then
+                    State.trollface.music:Stop()
+                    State.trollface.music:Destroy()
+                    State.trollface.music = nil
+                end
+            elseif getgenv().aim_settings.clickgui_image_mode == "Rena" then
+                ClickGuiImage.Size = UDim2.new(0, 240, 0, 460)
+                ClickGuiImage.Position = UDim2.new(1, -260, 1, -450)
+                ClickGuiImage.Image = "rbxassetid://124128032074674"
+                -- Сбрасываем trollface анимацию и музыку
+                if State.trollface.originalPosition then
+                    ClickGuiImage.Position = State.trollface.originalPosition
+                    State.trollface.originalPosition = nil
+                end
+                if State.trollface.music then
+                    State.trollface.music:Stop()
+                    State.trollface.music:Destroy()
+                    State.trollface.music = nil
+                end
+            elseif getgenv().aim_settings.clickgui_image_mode == "renagif" then
+                ClickGuiImage.Size = UDim2.new(0, 240, 0, 460)
+                ClickGuiImage.Position = UDim2.new(1, -260, 1, -450)
+                ClickGuiImage.ScaleType = Enum.ScaleType.Stretch
+                State.renaGif.time = State.renaGif.time + 0.016
+                if State.renaGif.time >= State.renaGif.delay then
+                    State.renaGif.time = 0
+                    State.renaGif.index = State.renaGif.index + 1
+                    if State.renaGif.index > #State.renaGif.frames then
+                        State.renaGif.index = 1
+                    end
+                end
+                ClickGuiImage.Image = State.renaGif.frames[State.renaGif.index]
+                if State.trollface.originalPosition then
+                    ClickGuiImage.Position = State.trollface.originalPosition
+                    State.trollface.originalPosition = nil
+                end
+                if State.trollface.music then
+                    State.trollface.music:Stop()
+                    State.trollface.music:Destroy()
+                    State.trollface.music = nil
                 end
             elseif getgenv().aim_settings.clickgui_image_mode == "trollface" then
                 ClickGuiImage.Image = "rbxassetid://91788760747906"
                 
                 -- Trollface animation effects
                 if getgenv().aim_settings.trollface_animate then
-                    trollfaceAnimationTime = trollfaceAnimationTime + 0.016 -- ~60 FPS
+                    State.trollface.animationTime = State.trollface.animationTime + 0.016 -- ~60 FPS
                     
                     -- Сохраняем оригинальную позицию при первом запуске
-                    if not trollfaceOriginalPosition then
-                        trollfaceOriginalPosition = ClickGuiImage.Position
+                    if not State.trollface.originalPosition then
+                        State.trollface.originalPosition = ClickGuiImage.Position
                     end
                     
                     -- Черные мигания (каждые 0.5 секунды)
-                    trollfaceFlashTime = trollfaceFlashTime + 0.016
-                    if trollfaceFlashTime >= 0.5 then
-                        trollfaceFlashTime = 0
+                    State.trollface.flashTime = State.trollface.flashTime + 0.016
+                    if State.trollface.flashTime >= 0.5 then
+                        State.trollface.flashTime = 0
                         -- Создаем черную вспышку на весь экран
                         local flashFrame = Instance.new("Frame", ScreenGui)
                         flashFrame.Size = UDim2.new(1, 0, 1, 0)
@@ -4969,48 +6041,48 @@ G.RS.RenderStepped:Connect(function()
                     
                     -- Тряска (маленькая)
                     local shakeIntensity = 3
-                    trollfaceShakeOffset = Vector2.new(
+                    State.trollface.shakeOffset = Vector2.new(
                         math.random(-shakeIntensity, shakeIntensity),
                         math.random(-shakeIntensity, shakeIntensity)
                     )
                     
                     ClickGuiImage.Position = UDim2.new(
-                        trollfaceOriginalPosition.X.Scale,
-                        trollfaceOriginalPosition.X.Offset + trollfaceShakeOffset.X,
-                        trollfaceOriginalPosition.Y.Scale,
-                        trollfaceOriginalPosition.Y.Offset + trollfaceShakeOffset.Y
+                        State.trollface.originalPosition.X.Scale,
+                        State.trollface.originalPosition.X.Offset + State.trollface.shakeOffset.X,
+                        State.trollface.originalPosition.Y.Scale,
+                        State.trollface.originalPosition.Y.Offset + State.trollface.shakeOffset.Y
                     )
                 else
                     -- Если анимация выключена, возвращаем к оригинальной позиции
-                    if trollfaceOriginalPosition then
-                        ClickGuiImage.Position = trollfaceOriginalPosition
+                    if State.trollface.originalPosition then
+                        ClickGuiImage.Position = State.trollface.originalPosition
                     end
                 end
                 
                 -- Trollface music
                 if getgenv().aim_settings.trollface_music then
                     -- Создаем музыку если её нет
-                    if not trollfaceMusic then
-                        trollfaceMusic = Instance.new("Sound")
-                        trollfaceMusic.SoundId = "rbxassetid://140709876805704"
-                        trollfaceMusic.Looped = true
-                        trollfaceMusic.Volume = getgenv().aim_settings.trollface_volume
-                        trollfaceMusic.Parent = workspace
-                        trollfaceMusic:Play()
+                    if not State.trollface.music then
+                        State.trollface.music = Instance.new("Sound")
+                        State.trollface.music.SoundId = "rbxassetid://140709876805704"
+                        State.trollface.music.Looped = true
+                        State.trollface.music.Volume = getgenv().aim_settings.trollface_volume
+                        State.trollface.music.Parent = workspace
+                        State.trollface.music:Play()
                     else
                         -- Обновляем громкость
-                        trollfaceMusic.Volume = getgenv().aim_settings.trollface_volume
+                        State.trollface.music.Volume = getgenv().aim_settings.trollface_volume
                         -- Проверяем что музыка играет
-                        if not trollfaceMusic.IsPlaying then
-                            trollfaceMusic:Play()
+                        if not State.trollface.music.IsPlaying then
+                            State.trollface.music:Play()
                         end
                     end
                 else
                     -- Останавливаем и удаляем музыку
-                    if trollfaceMusic then
-                        trollfaceMusic:Stop()
-                        trollfaceMusic:Destroy()
-                        trollfaceMusic = nil
+                    if State.trollface.music then
+                        State.trollface.music:Stop()
+                        State.trollface.music:Destroy()
+                        State.trollface.music = nil
                     end
                 end
             end
@@ -5053,41 +6125,47 @@ G.RS.RenderStepped:Connect(function()
     end
     
     -- FullBright (применяем только при изменении состояния)
-    if getgenv().aim_settings.fullbright ~= fullbrightActive then
-        fullbrightActive = getgenv().aim_settings.fullbright
+    if getgenv().aim_settings.fullbright ~= State.worldTweaks.fullbrightActive then
+        State.worldTweaks.fullbrightActive = getgenv().aim_settings.fullbright
         
-        if fullbrightActive then
+        if State.worldTweaks.fullbrightActive then
             G.Light.Brightness = 2
             G.Light.ClockTime = 14
             G.Light.FogEnd = 100000
             G.Light.GlobalShadows = false
             G.Light.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
         else
-            if originalLighting.Brightness then
-                G.Light.Brightness = originalLighting.Brightness
-                G.Light.FogEnd = originalLighting.FogEnd
-                G.Light.GlobalShadows = originalLighting.GlobalShadows
-                G.Light.OutdoorAmbient = originalLighting.OutdoorAmbient
+            if State.worldTweaks.originalLighting.Brightness then
+                G.Light.Brightness = State.worldTweaks.originalLighting.Brightness
+                G.Light.FogEnd = State.worldTweaks.originalLighting.FogEnd
+                G.Light.GlobalShadows = State.worldTweaks.originalLighting.GlobalShadows
+                G.Light.OutdoorAmbient = State.worldTweaks.originalLighting.OutdoorAmbient
             end
             -- Восстанавливаем ClockTime только если Always Day тоже выключен
-            if not getgenv().aim_settings.always_day and originalLighting.ClockTime then
-                G.Light.ClockTime = originalLighting.ClockTime
+            if not getgenv().aim_settings.always_day and State.worldTweaks.originalLighting.ClockTime then
+                G.Light.ClockTime = State.worldTweaks.originalLighting.ClockTime
             end
         end
     end
     
     -- Always Day (применяем только при изменении состояния)
-    if getgenv().aim_settings.always_day ~= alwaysDayActive then
-        alwaysDayActive = getgenv().aim_settings.always_day
+    if getgenv().aim_settings.always_day ~= State.worldTweaks.alwaysDayActive then
+        State.worldTweaks.alwaysDayActive = getgenv().aim_settings.always_day
         
-        if alwaysDayActive then
+        if State.worldTweaks.alwaysDayActive then
             G.Light.ClockTime = 12
         else
             -- Восстанавливаем только если FullBright тоже выключен
-            if not getgenv().aim_settings.fullbright and originalLighting.ClockTime then
-                G.Light.ClockTime = originalLighting.ClockTime
+            if not getgenv().aim_settings.fullbright and State.worldTweaks.originalLighting.ClockTime then
+                G.Light.ClockTime = State.worldTweaks.originalLighting.ClockTime
             end
         end
+    end
+
+    if getgenv().aim_settings.world_tweaks_enabled then
+        applyWorldTweaks()
+    elseif State.worldTweaks.active then
+        restoreWorldTweaks()
     end
     
     -- Target HUD Display
@@ -5113,7 +6191,11 @@ G.RS.RenderStepped:Connect(function()
             if hum then
                 local health = math.floor(hum.Health)
                 local maxHealth = math.floor(hum.MaxHealth)
+                local velocity = State.LockedTarget.Velocity
+                local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+                local speed = math.floor(horizontalVelocity.Magnitude * 10) / 10
                 TargetHPLabel.Text = "HP: " .. health
+                TargetSpeedInfoLabel.Text = speed .. " studs/s"
                 
                 -- Анимация HP бара
                 local healthPercent = math.clamp(health / maxHealth, 0, 1)
@@ -5133,9 +6215,14 @@ G.RS.RenderStepped:Connect(function()
         TargetNameLabel.Text = G.LP.Name
         TargetMetaLabel.Text = ""
         local previewHumanoid = G.LP.Character and G.LP.Character:FindFirstChildOfClass("Humanoid")
+        local previewRoot = G.LP.Character and G.LP.Character:FindFirstChild("HumanoidRootPart")
         local previewHealth = math.floor((previewHumanoid and previewHumanoid.Health) or 100)
         local previewMaxHealth = math.max((previewHumanoid and previewHumanoid.MaxHealth) or 100, 1)
+        local previewVelocity = previewRoot and previewRoot.Velocity or Vector3.new(0, 0, 0)
+        local previewHorizontalVelocity = Vector3.new(previewVelocity.X, 0, previewVelocity.Z)
+        local previewSpeed = math.floor(previewHorizontalVelocity.Magnitude * 10) / 10
         TargetHPLabel.Text = "HP: " .. previewHealth
+        TargetSpeedInfoLabel.Text = previewSpeed .. " studs/s"
         HPBarFill.Size = UDim2.new(math.clamp(previewHealth / previewMaxHealth, 0, 1), 0, 1, 0)
         
         -- Используем цвета клиента для градиента
@@ -5146,10 +6233,77 @@ G.RS.RenderStepped:Connect(function()
     
     -- Unload Script Logic
     if getgenv().aim_settings.unload_script then
-        getgenv().aim_settings.running = false
+        -- Отключаем все функции перед выгрузкой
+        getgenv().aim_settings.enabled = false
+        getgenv().aim_settings.esp_enabled = false
+        getgenv().aim_settings.target_esp = false
+        getgenv().aim_settings.target_hud = false
+        getgenv().aim_settings.friend_markers = false
+        getgenv().aim_settings.arrows = false
+        getgenv().aim_settings.rainbow_fov = false
+        getgenv().aim_settings.rainbow_crosshair = false
+        getgenv().aim_settings.jump_circle_enabled = false
+        getgenv().aim_settings.clickgui_enabled = false
         getgenv().aim_settings.cosmetic_enabled = false
         getgenv().aim_settings.china_hat = false
         getgenv().aim_settings.china_hat_friends = false
+        getgenv().aim_settings.trails_enabled = false
+        getgenv().aim_settings.tp_walk_enabled = false
+        getgenv().aim_settings.infinite_jump_enabled = false
+        getgenv().aim_settings.spider_enabled = false
+        getgenv().aim_settings.air_stuck_enabled = false
+        getgenv().aim_settings.smooth_fall_enabled = false
+        getgenv().aim_settings.speed_enabled = false
+        getgenv().aim_settings.safe_walk_enabled = false
+        getgenv().aim_settings.fly_enabled = false
+        getgenv().aim_settings.freecam_enabled = false
+        getgenv().aim_settings.anti_fling = false
+        getgenv().aim_settings.fullbright = false
+        getgenv().aim_settings.always_day = false
+        getgenv().aim_settings.world_tweaks_enabled = false
+        getgenv().aim_settings.hitboxes_enabled = false
+        getgenv().aim_settings.hud_enabled = false
+        getgenv().aim_settings.watermark_enabled = false
+        getgenv().aim_settings.keybind_list_enabled = false
+        getgenv().aim_settings.running = false
+        
+        -- Очищаем все hotkeys
+        getgenv().aim_settings.hotkeys = {}
+        getgenv().aim_settings.clickgui_bind = Enum.KeyCode.Unknown
+        getgenv().aim_settings.click_action_key = Enum.KeyCode.Unknown
+        getgenv().aim_settings.toggle_key = Enum.KeyCode.Unknown
+        
+        -- Вызываем все cleanup функции
+        pcall(function() Movement.Spider.Cleanup() end)
+        pcall(function() Movement.AirStuck.Cleanup() end)
+        pcall(function() Movement.SmoothFall.Cleanup() end)
+        pcall(function() Movement.Speed.Cleanup() end)
+        pcall(function() Movement.SafeWalk.Cleanup() end)
+        pcall(function() Fly_Cleanup() end)
+        pcall(function() restoreWorldTweaks() end)
+        pcall(function() IJ_CP() end)
+        
+        -- Восстанавливаем Freecam
+        local fc = getgenv().freecam_data
+        if fc.original_type then
+            G.Cam.CameraType = fc.original_type
+            fc.original_type = nil
+        end
+        if fc.char_anchored and G.LP.Character and G.LP.Character:FindFirstChild("HumanoidRootPart") then
+            G.LP.Character.HumanoidRootPart.Anchored = false
+            fc.char_anchored = false
+        end
+        fc.cframe = nil
+        
+        -- Отключаем все connections
+        for name, connection in pairs(State.connections) do
+            if connection then
+                pcall(function()
+                    connection:Disconnect()
+                end)
+            end
+        end
+        State.connections = {}
         
         -- Очищаем Game Scripts connections
         
@@ -5159,13 +6313,13 @@ G.RS.RenderStepped:Connect(function()
         FOVCircle:Remove()
         
         -- Очищаем JumpCircles
-        for i = #jumpCircles, 1, -1 do
-            local circle = jumpCircles[i]
+        for i = #State.jumpCircles, 1, -1 do
+            local circle = State.jumpCircles[i]
             if circle.circlePart then circle.circlePart:Destroy() end
-            table.remove(jumpCircles, i)
+            table.remove(State.jumpCircles, i)
         end
-        jumpCircles = {}
-        lastJumpState = {}
+        State.jumpCircles = {}
+        State.lastJumpState = {}
         
         -- Удаляем все оставшиеся JumpCircle Part'ы в workspace (на всякий случай)
         for _, obj in pairs(workspace:GetChildren()) do
@@ -5180,10 +6334,10 @@ G.RS.RenderStepped:Connect(function()
         if ClickGuiImage then ClickGuiImage.Visible = false end
         
         -- Очищаем trollface музыку
-        if trollfaceMusic then
-            trollfaceMusic:Stop()
-            trollfaceMusic:Destroy()
-            trollfaceMusic = nil
+        if State.trollface.music then
+            State.trollface.music:Stop()
+            State.trollface.music:Destroy()
+            State.trollface.music = nil
         end
         
         -- Очищаем China Hat
@@ -5225,6 +6379,46 @@ G.RS.RenderStepped:Connect(function()
             State.trails.attachment1 = nil
         end
         
+        -- Очищаем Spider
+        if State.spider.connection then 
+            State.spider.connection:Disconnect() 
+            State.spider.connection = nil 
+        end
+        if State.spider.fallLimiter then 
+            State.spider.fallLimiter:Disconnect() 
+            State.spider.fallLimiter = nil 
+        end
+        if State.spider.bypassTimer then 
+            State.spider.bypassTimer:Disconnect() 
+            State.spider.bypassTimer = nil 
+        end
+        if State.spider.platform then 
+            State.spider.platform:Destroy() 
+            State.spider.platform = nil 
+        end
+        if State.spider.platformConnection then 
+            State.spider.platformConnection:Disconnect() 
+            State.spider.platformConnection = nil 
+        end
+        
+        -- Очищаем Air Stuck
+        if State.airStuck then
+            if State.airStuck.connection then
+                State.airStuck.connection:Disconnect()
+                State.airStuck.connection = nil
+            end
+            State.airStuck = {}
+        end
+        
+        -- Очищаем Smooth Fall
+        if State.smoothFall then
+            if State.smoothFall.connection then
+                State.smoothFall.connection:Disconnect()
+                State.smoothFall.connection = nil
+            end
+            State.smoothFall = {}
+        end
+        
         -- Восстанавливаем AntiFling
         for key, data in pairs(State.originalCanCollide) do
             if data.part and data.part.Parent then
@@ -5236,13 +6430,18 @@ G.RS.RenderStepped:Connect(function()
         State.originalCanCollide = {}
         
         -- Восстанавливаем оригинальные настройки освещения
-        if originalLighting.Brightness then
-            G.Light.Brightness = originalLighting.Brightness
-            G.Light.ClockTime = originalLighting.ClockTime
-            G.Light.FogEnd = originalLighting.FogEnd
-            G.Light.GlobalShadows = originalLighting.GlobalShadows
-            G.Light.OutdoorAmbient = originalLighting.OutdoorAmbient
+        if State.worldTweaks.originalLighting.Brightness then
+            G.Light.Brightness = State.worldTweaks.originalLighting.Brightness
+            G.Light.ClockTime = State.worldTweaks.originalLighting.ClockTime
+            G.Light.FogEnd = State.worldTweaks.originalLighting.FogEnd
+            G.Light.FogColor = State.worldTweaks.originalLighting.FogColor
+            G.Light.Ambient = State.worldTweaks.originalLighting.Ambient
+            G.Light.GlobalShadows = State.worldTweaks.originalLighting.GlobalShadows
+            G.Light.OutdoorAmbient = State.worldTweaks.originalLighting.OutdoorAmbient
+            G.Light.ColorShift_Top = State.worldTweaks.originalLighting.ColorShiftTop
+            G.Light.ColorShift_Bottom = State.worldTweaks.originalLighting.ColorShiftBottom
         end
+        restoreWorldTweaks()
         
         for _, p in pairs(G.Plr:GetPlayers()) do
             if p.Character then
@@ -5284,7 +6483,7 @@ end)
 G.RS:BindToRenderStep("Y_AimbotCamera", Enum.RenderPriority.Last.Value + 1, updateAimbotCamera or function() end)
 
 -- [[ GLOBAL MOUSE RELEASE ]]
-G.UIS.InputEnded:Connect(function(input)
+State.connections.inputEnded = G.UIS.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         for _, panel in ipairs(State.panels) do
             panel.dragging = false
@@ -5294,7 +6493,7 @@ G.UIS.InputEnded:Connect(function(input)
 end)
 
 -- [[ HOTKEYS & BINDS ]]
-G.UIS.InputBegan:Connect(function(input, gp)
+State.connections.inputBegan = G.UIS.InputBegan:Connect(function(input, gp)
     if gp then return end
     
     -- Handle Binding (назначение клавиши) - проверяем первым
@@ -5376,10 +6575,193 @@ G.UIS.InputEnded:Connect(function(input, gp)
     if gp then return end
 end)
 
+-- Fly Functions (using State to avoid local variable limit)
+local function Fly_Cleanup()
+    if State.fly then
+        if State.fly.connection then State.fly.connection:Disconnect() end
+        if State.fly.bodyGyro then State.fly.bodyGyro:Destroy() end
+        if State.fly.bodyVelocity then State.fly.bodyVelocity:Destroy() end
+        if State.fly.platform then State.fly.platform:Destroy() end
+        if State.fly.bypassTimer then State.fly.bypassTimer:Disconnect() end
+        if State.fly.tween then State.fly.tween:Cancel() end
+        State.fly = {}
+    end
+end
+
+local function getFlyMoveDirection()
+    State.flyDir = Vector3.new(0, 0, 0)
+    if G.UIS:IsKeyDown(Enum.KeyCode.W) then State.flyDir = State.flyDir + G.Cam.CFrame.LookVector end
+    if G.UIS:IsKeyDown(Enum.KeyCode.S) then State.flyDir = State.flyDir - G.Cam.CFrame.LookVector end
+    if G.UIS:IsKeyDown(Enum.KeyCode.A) then State.flyDir = State.flyDir - G.Cam.CFrame.RightVector end
+    if G.UIS:IsKeyDown(Enum.KeyCode.D) then State.flyDir = State.flyDir + G.Cam.CFrame.RightVector end
+    if G.UIS:IsKeyDown(Enum.KeyCode.Space) then State.flyDir = State.flyDir + Vector3.new(0, 1, 0) end
+    if G.UIS:IsKeyDown(Enum.KeyCode.LeftShift) then State.flyDir = State.flyDir - Vector3.new(0, 1, 0) end
+    return State.flyDir
+end
+
+local function Fly_Mode_Gyro()
+    State.fly.bodyGyro = Instance.new("BodyGyro", State.fly.hr)
+    State.fly.bodyGyro.P = 9e4
+    State.fly.bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    State.fly.bodyVelocity = Instance.new("BodyVelocity", State.fly.hr)
+    State.fly.bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    
+    State.fly.connection = G.RS.Heartbeat:Connect(function()
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr and State.fly.bodyGyro) then Fly_Cleanup() return end
+        State.fly.bodyGyro.CFrame = G.Cam.CFrame
+        getFlyMoveDirection()
+        
+        if State.fly.bypass then
+            if State.fly.bMode == "Jitter" and tick() - State.fly.lastVel > 0.03 then
+                State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50) + Vector3.new(math.random(-10, 10)/10, math.random(-10, 10)/10, math.random(-10, 10)/10)
+                State.fly.lastVel = tick()
+            elseif State.fly.bMode == "Smooth" then
+                State.fly.bodyVelocity.Velocity = State.fly.bodyVelocity.Velocity:Lerp(State.flyDir * (State.flyS.fly_speed * 50), 0.1)
+            else
+                State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50)
+            end
+        else
+            State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50)
+        end
+    end)
+end
+
+local function Fly_Mode_CFrame()
+    State.fly.connection = G.RS.Heartbeat:Connect(function()
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr) then Fly_Cleanup() return end
+        getFlyMoveDirection()
+        
+        if State.fly.bypass then
+            if State.fly.bMode == "Jitter" and tick() - State.fly.lastTouch > 0.02 then
+                State.fly.hr.CFrame = State.fly.hr.CFrame + State.flyDir * State.flyS.fly_speed + Vector3.new(math.random(-5, 5)/100, math.random(-5, 5)/100, math.random(-5, 5)/100)
+                State.fly.hr.Velocity = Vector3.new(0, 0, 0)
+                State.fly.lastTouch = tick()
+            elseif State.fly.bMode == "Smooth" then
+                State.fly.hr.CFrame = CFrame.new(State.fly.hr.Position:Lerp(State.fly.hr.Position + State.flyDir * State.flyS.fly_speed * 0.5, 0.2))
+                State.fly.hr.Velocity = State.flyDir * (State.flyS.fly_speed * 10)
+            else
+                State.fly.hr.Velocity = Vector3.new(0, 0, 0)
+                State.fly.hr.CFrame = State.fly.hr.CFrame + State.flyDir * State.flyS.fly_speed
+            end
+        else
+            State.fly.hr.Velocity = Vector3.new(0, 0, 0)
+            State.fly.hr.CFrame = State.fly.hr.CFrame + State.flyDir * State.flyS.fly_speed
+        end
+    end)
+end
+
+local function Fly_Mode_Platform()
+    State.fly.platform = Instance.new("Part", workspace)
+    State.fly.platform.Size = Vector3.new(8, 0.5, 8)
+    State.fly.platform.Anchored = true
+    State.fly.platform.CanCollide = true
+    State.fly.platform.Transparency = 1
+    State.fly.platform.Material = Enum.Material.ForceField
+    State.fly.platform.CastShadow = false
+    
+    if State.fly.bypass then
+        State.fly.bypassTimer = G.RS.Heartbeat:Connect(function()
+            if not State.flyS.fly_enabled then Fly_Cleanup() return end
+            if State.fly.bMode == "Jitter" then
+                State.fly.platform.CanCollide = math.random() > 0.3
+            elseif State.fly.bMode == "Smooth" then
+                State.fly.platform.Transparency = math.abs(math.sin(tick() * 2))
+                State.fly.platform.CanCollide = State.fly.platform.Transparency < 0.5
+            end
+        end)
+    end
+    
+    State.fly.connection = G.RS.Heartbeat:Connect(function()
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr and State.fly.platform) then Fly_Cleanup() return end
+        getFlyMoveDirection()
+        if State.flyDir.Magnitude > 0 then State.fly.hr.CFrame = State.fly.hr.CFrame + State.flyDir * State.flyS.fly_speed end
+        State.fly.platform.Position = State.fly.hr.Position - Vector3.new(0, 3.5, 0)
+    end)
+end
+
+local function Fly_Mode_Velocity()
+    State.fly.connection = G.RS.Heartbeat:Connect(function()
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr) then Fly_Cleanup() return end
+        getFlyMoveDirection()
+        
+        if State.fly.bypass then
+            if State.fly.bMode == "Jitter" then
+                State.fly.hr.Velocity = State.flyDir * (State.flyS.fly_speed * 16) + Vector3.new(math.random(-20, 20), math.random(-20, 20), math.random(-20, 20))
+            elseif State.fly.bMode == "Smooth" then
+                State.fly.hr.Velocity = State.fly.hr.Velocity:Lerp(State.flyDir * (State.flyS.fly_speed * 16), 0.15)
+            else
+                State.fly.hr.Velocity = State.flyDir * (State.flyS.fly_speed * 16)
+            end
+        else
+            State.fly.hr.Velocity = State.flyDir * (State.flyS.fly_speed * 16)
+        end
+    end)
+end
+
+local function Fly_Mode_Tween()
+    State.fly.connection = G.RS.Heartbeat:Connect(function()
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr) then Fly_Cleanup() return end
+        getFlyMoveDirection()
+        
+        if State.flyDir.Magnitude > 0 then
+            State.flyTargetPos = State.fly.hr.Position + State.flyDir * State.flyS.fly_speed * 2
+            
+            if State.fly.bypass then
+                if State.fly.bMode == "Jitter" then
+                    State.flyTargetPos = State.flyTargetPos + Vector3.new(math.random(-5, 5)/10, math.random(-5, 5)/10, math.random(-5, 5)/10)
+                elseif State.fly.bMode == "Smooth" then
+                    State.fly.hr.CFrame = State.fly.hr.CFrame:Lerp(CFrame.new(State.flyTargetPos), 0.05)
+                    return
+                end
+            end
+            
+            if State.fly.tween then State.fly.tween:Cancel() end
+            State.fly.tween = G.TS:Create(State.fly.hr, TweenInfo.new(0.1, Enum.EasingStyle.Linear), {CFrame = CFrame.new(State.flyTargetPos)})
+            State.fly.tween:Play()
+        end
+    end)
+end
+
+local function Fly_Init()
+    Fly_Cleanup()
+    if not getgenv().aim_settings.fly_enabled then return end
+    
+    State.fly = {ch = G.LP.Character}
+    if not State.fly.ch then return end
+    State.fly.hr = State.fly.ch:FindFirstChild("HumanoidRootPart")
+    State.fly.hm = State.fly.ch:FindFirstChildOfClass("Humanoid")
+    if not State.fly.hr then return end
+    
+    State.flyS = getgenv().aim_settings
+    State.fly.mode = State.flyS.fly_mode
+    State.fly.bypass = State.flyS.fly_bypass
+    State.fly.bMode = State.flyS.fly_bypass_mode
+    State.fly.lastTouch = tick()
+    State.fly.lastVel = tick()
+    State.fly.bCool = 0
+    
+    if State.fly.mode == "Gyro" then
+        Fly_Mode_Gyro()
+    elseif State.fly.mode == "CFrame" then
+        Fly_Mode_CFrame()
+    elseif State.fly.mode == "Platform" then
+        Fly_Mode_Platform()
+    elseif State.fly.mode == "Velocity" then
+        Fly_Mode_Velocity()
+    else
+        Fly_Mode_Tween()
+    end
+end
+
 -- Инициализация Infinite Jump
-G.LP.CharacterAdded:Connect(function() 
+State.connections.characterAdded = G.LP.CharacterAdded:Connect(function() 
     wait(0.5) 
     IJ_I()
+    Movement.Spider.Init()
+    Movement.AirStuck.Init()
+    Movement.SmoothFall.Init()
+    Movement.Speed.Init()
+    Fly_Init()
     
     -- Очищаем трейлы при смерти персонажа
     if State.trails.trail then
@@ -5396,36 +6778,108 @@ G.LP.CharacterAdded:Connect(function()
     end
 end)
 
-local lastIJM = getgenv().aim_settings.infinite_jump_mode
-local lastIJP = getgenv().aim_settings.infinite_jump_power
-G.RS.Heartbeat:Connect(function()
-    local modeChanged = getgenv().aim_settings.infinite_jump_mode ~= lastIJM
-    local powerChanged = getgenv().aim_settings.infinite_jump_power ~= lastIJP
-    
-    if modeChanged or powerChanged then
-        lastIJM = getgenv().aim_settings.infinite_jump_mode
-        lastIJP = getgenv().aim_settings.infinite_jump_power
+-- Инициализация Spider при загрузке
+if G.LP.Character then
+    Movement.Spider.Init()
+end
+
+-- Переменные отслеживания изменений (в State для экономии локальных переменных)
+State.lastIJM = getgenv().aim_settings.infinite_jump_mode
+State.lastIJP = getgenv().aim_settings.infinite_jump_power
+State.lastSpiderMode = getgenv().aim_settings.spider_mode
+State.lastSpiderBypass = getgenv().aim_settings.spider_bypass
+State.lastFlyMode = getgenv().aim_settings.fly_mode
+State.lastFlyBypass = getgenv().aim_settings.fly_bypass
+State.lastFlyBypassMode = getgenv().aim_settings.fly_bypass_mode
+
+-- Цикл 1: Infinite Jump
+State.connections.ijLoop = G.RS.Heartbeat:Connect(function()
+    local s = getgenv().aim_settings
+    if s.infinite_jump_mode ~= State.lastIJM or s.infinite_jump_power ~= State.lastIJP then
+        State.lastIJM = s.infinite_jump_mode
+        State.lastIJP = s.infinite_jump_power
         
-        if getgenv().aim_settings.infinite_jump_enabled then
-            IJ_I()
-        end
+        if s.infinite_jump_enabled then IJ_I() end
         
-        -- Обновляем силу прыжка в реальном времени
-        if powerChanged and G.LP.Character then
+        if G.LP.Character then
             local hm = G.LP.Character:FindFirstChildOfClass("Humanoid")
             if hm then
-                if hm.UseJumpPower then
-                    hm.JumpPower = lastIJP
-                else
-                    hm.JumpHeight = lastIJP / 10
-                end
+                if hm.UseJumpPower then hm.JumpPower = State.lastIJP else hm.JumpHeight = State.lastIJP / 10 end
             end
         end
     end
 end)
 
-if G.LP.Character then IJ_I() end
+-- Цикл 2: Spider
+State.connections.spiderLoop = G.RS.Heartbeat:Connect(function()
+    local s = getgenv().aim_settings
+    if s.spider_mode ~= State.lastSpiderMode or s.spider_bypass ~= State.lastSpiderBypass then
+        State.lastSpiderMode = s.spider_mode
+        State.lastSpiderBypass = s.spider_bypass
+        if s.spider_enabled then Spider_Init() else Spider_Cleanup() end
+    end
+    
+    if s.spider_enabled then
+        if not State.spider.connection and not State.spider.fallLimiter and not State.spider.bypassTimer and not State.spider.platformConnection then
+            Spider_Init()
+        end
+    else
+        if State.spider.connection or State.spider.fallLimiter or State.spider.bypassTimer or State.spider.platformConnection then
+            Spider_Cleanup()
+        end
+    end
+end)
 
-print("[Infinite Jump] OK")
+-- Цикл 3: Air Stuck & Smooth Fall & Speed
+State.connections.asLoop = G.RS.Heartbeat:Connect(function()
+    local s = getgenv().aim_settings
+    if s.air_stuck_enabled then
+        if not State.airStuck or not State.airStuck.connection then AirStuck_Init() end
+    else
+        if State.airStuck and State.airStuck.connection then AirStuck_Cleanup() end
+    end
+    
+    if s.smooth_fall_enabled then
+        if not State.smoothFall or not State.smoothFall.connection then SmoothFall_Init() end
+    else
+        if State.smoothFall and State.smoothFall.connection then SmoothFall_Cleanup() end
+    end
+    
+    if s.speed_enabled then
+        if not State.speed or not State.speed.connection then Speed_Init() end
+    else
+        if State.speed and State.speed.connection then Speed_Cleanup() end
+    end
+    
+    if s.safe_walk_enabled then
+        if not State.safeWalk or not State.safeWalk.connection then SafeWalk_Init() end
+    else
+        if State.safeWalk and State.safeWalk.connection then SafeWalk_Cleanup() end
+    end
+end)
 
+-- Цикл 4: Fly
+State.connections.flyLoop = G.RS.Heartbeat:Connect(function()
+    local s = getgenv().aim_settings
+    if s.fly_mode ~= State.lastFlyMode or s.fly_bypass ~= State.lastFlyBypass or s.fly_bypass_mode ~= State.lastFlyBypassMode then
+        State.lastFlyMode = s.fly_mode
+        State.lastFlyBypass = s.fly_bypass
+        State.lastFlyBypassMode = s.fly_bypass_mode
+        if s.fly_enabled then Fly_Init() end
+    end
+    
+    if s.fly_enabled then
+        if not State.fly or not State.fly.connection then Fly_Init() end
+    else
+        if State.fly and State.fly.connection then Fly_Cleanup() end
+    end
+end)
 
+if G.LP.Character then 
+    IJ_I()
+    Movement.Spider.Init()
+    Movement.AirStuck.Init()
+    Movement.SmoothFall.Init()
+    Movement.Speed.Init()
+    Fly_Init()
+end
