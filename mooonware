@@ -17,7 +17,9 @@ getgenv().aim_settings = {
     target_esp_mode = "Crosshair",
     target_hud = false,
     esp_enabled = false,
+    esp_self = false,
     esp_chams = false,
+    esp_glow_chams = false,
     esp_nametags = true,
     esp_hp_bar = true,
     esp_tool = true,
@@ -92,6 +94,9 @@ getgenv().aim_settings = {
     trails_enabled = false, -- Trails за персонажем
     trails_color = Color3.fromRGB(0, 170, 255),
     trails_lifetime = 2, -- Время жbизни трейла в секундах
+    viewmodel_enabled = false,
+    viewmodel_material = "Neon",
+    viewmodel_color = Color3.fromRGB(0, 170, 255),
     clickgui_bind = Enum.KeyCode.RightControl,
     hotkeys = {},
     friends = {},
@@ -114,6 +119,13 @@ getgenv().aim_settings = {
     -- TP Walk settings
     tp_walk_enabled = false,
     tp_walk_speed = 5,
+    target_strafe_enabled = false,
+    target_strafe_target = "",
+    target_strafe_radius = 6,
+    target_strafe_speed = 2.5,
+    target_strafe_autopredict = false,
+    target_strafe_prediction_strength = 1.2, -- Сила предикции (0.5 - 3.0)
+    target_strafe_predicted_pos = false,
     -- Infinite Jump settings
     infinite_jump_enabled = false,
     infinite_jump_mode = "Default", -- "Default" или "Platform"
@@ -140,13 +152,18 @@ getgenv().aim_settings = {
     smooth_fall_smoothness = 0.5, -- Плавность (0.1-1.0)
     -- Fly settings
     fly_enabled = false,
-    fly_mode = "Gyro", -- "Gyro", "CFrame", "Platform", "Velocity", "Tween"
+    fly_mode = "Gyro", -- "Gyro", "CFrame", "Platform", "Velocity", "Tween", "Climb", "Seat", "Test", "Lags", "Legit"
     fly_speed = 1, -- Скорость полёта (0.1-5)
     fly_bypass = false, -- Обход античита
     fly_bypass_mode = "Velocity", -- "Velocity", "Teleport", "Hybrid", "Jitter", "Smooth"
+
     -- Freecam settings (Misc)
     freecam_enabled = false,
     freecam_speed = 1,
+    -- Clumsy settings (Movement)
+    clumsy_enabled = false,
+    clumsy_speed = 50, -- Скорость полета (10-100)
+    clumsy_visualize = false, -- Показывать клон персонажа где застыли
 }
 
 -- [[ SERVICES & GLOBALS ]]
@@ -156,7 +173,8 @@ local G = {
     RS = game:GetService("RunService"),
     Plr = game:GetService("Players"),
     Http = game:GetService("HttpService"),
-    Light = game:GetService("Lighting")
+    Light = game:GetService("Lighting"),
+    CP = game:GetService("ContentProvider")
 }
 G.LP = G.Plr.LocalPlayer
 G.Cam = workspace.CurrentCamera
@@ -172,6 +190,9 @@ local State = {
     chinaHatLayers = {},
     lastCameraMode = nil,
     friendsHats = {},
+    viewmodel = {
+        originals = {}
+    },
     trails = {}, -- Хранение трейлов для персонажа
     originalCanCollide = {}, -- Хранение оригинальных значений CanCollide для AntiFling
     spider = {}, -- Хранение данных Spider
@@ -179,6 +200,15 @@ local State = {
     smoothFall = {}, -- Хранение данных Smooth Fall
     speed = {}, -- Хранение данных Speed
     fly = {}, -- Хранение данных Fly
+    clumsy = {}, -- Хранение данных Clumsy
+    targetStrafe = {
+        angle = 0,
+        active = false,
+        targetPlayer = nil,
+        smoothedCenter = nil,
+        lastTargetPosition = nil,
+        visuals = {}
+    },
     connections = {}, -- Хранение всех connections для очистки
     uiRefreshers = {},
     lastClientColor = nil,
@@ -201,6 +231,14 @@ local State = {
         pingAnimProgress = 1
     },
     keybindItems = {},
+    playerVisualsActive = false,
+    persistentPlayerEspActive = false,
+    playerEspRegistry = {},
+    playerEspConnections = {},
+    arrowsActive = false,
+    jumpCirclesActive = false,
+    chinaHatActive = false,
+    hitboxesActive = false,
     worldTweaks = {
         active = false,
         lastPreset = nil,
@@ -288,12 +326,71 @@ local State = {
         },
         index = 1,
         time = 0,
-        delay = 0.11
+        delay = 0.050,
+        preloaded = false,
+        preloading = false,
+        preloadAttempted = false,
+        lastFrame = nil
+    },
+    kurumiGif = {
+        frames = {
+            "rbxassetid://112673578173590", "rbxassetid://89050218007292", "rbxassetid://83537554530571",
+            "rbxassetid://86160064009697", "rbxassetid://119375950925534", "rbxassetid://122576601726772",
+            "rbxassetid://106407121560452", "rbxassetid://87616402415960", "rbxassetid://117768937359958",
+            "rbxassetid://73449769099286", "rbxassetid://74265285589757", "rbxassetid://115927512398712",
+            "rbxassetid://94954806761034", "rbxassetid://126814029485902", "rbxassetid://109187999209530",
+            "rbxassetid://88170667706504", "rbxassetid://96985886030265", "rbxassetid://99501249709068",
+            "rbxassetid://81938109896548", "rbxassetid://90000248189900", "rbxassetid://95164295275867",
+            "rbxassetid://135494166647308", "rbxassetid://75570653899387", "rbxassetid://103545900635133",
+            "rbxassetid://114436672955303", "rbxassetid://73252729394307", "rbxassetid://97643092187336",
+            "rbxassetid://117061875601458", "rbxassetid://92463050801912", "rbxassetid://98519375603928"
+        },
+        index = 1,
+        time = 0,
+        delay = 0.050,
+        preloaded = false,
+        preloading = false,
+        preloadAttempted = false,
+        lastFrame = nil
     }
 }
 
 -- Utility function (нужна для IJ)
 local function getClientColor() return getgenv().aim_settings.client_color end
+
+local function preloadGifFrames(gifState)
+    if not gifState or gifState.preloaded or gifState.preloading or gifState.preloadAttempted then
+        return
+    end
+
+    gifState.preloadAttempted = true
+    gifState.preloading = true
+    task.spawn(function()
+        local ok = pcall(function()
+            G.CP:PreloadAsync(gifState.frames)
+        end)
+        gifState.preloading = false
+        gifState.preloaded = ok
+    end)
+end
+
+local function getGifFrame(gifState, dt)
+    if not gifState or not gifState.frames or #gifState.frames == 0 then
+        return nil
+    end
+
+    gifState.time = gifState.time + math.min(dt or 0.016, 0.25)
+    if gifState.time >= gifState.delay then
+        local steps = math.floor(gifState.time / gifState.delay)
+        gifState.time = gifState.time - (steps * gifState.delay)
+        gifState.index = ((gifState.index - 1 + math.min(steps, 3)) % #gifState.frames) + 1
+    end
+
+    return gifState.frames[gifState.index]
+end
+
+preloadGifFrames(State.renaGif)
+preloadGifFrames(State.kurumiGif)
 
 -- Infinite Jump State
 local IJ = {c = nil, p = nil, pc = nil}
@@ -1946,6 +2043,286 @@ local function destroyChinaHat(hatData)
     end
 end
 
+local function clearAuraChamsArtifacts(character)
+    if not character then return end
+    for _, obj in pairs(character:GetDescendants()) do
+        if obj.Name == "Y_ESP_Aura"
+            or obj.Name == "Y_ESP_Aura_Attachment"
+            or obj.Name == "Y_ESP_Glow_Weld" then
+            obj:Destroy()
+        end
+    end
+
+    local glowFolder = character:FindFirstChild("Y_ESP_Glow")
+    if glowFolder then
+        glowFolder:Destroy()
+    end
+
+    local glowOutline = character:FindFirstChild("Y_ESP_Glow_Outline")
+    if glowOutline then
+        glowOutline:Destroy()
+    end
+end
+
+local function clearCharacterVisuals(character)
+    if not character then return end
+
+    local highlight = character:FindFirstChild("Y_ESP")
+    if highlight then
+        highlight:Destroy()
+    end
+
+    clearAuraChamsArtifacts(character)
+
+    local head = character:FindFirstChild("Head")
+    if head then
+        local textGui = head:FindFirstChild("Y_ESP_Text")
+        if textGui then
+            textGui:Destroy()
+        end
+
+        local friendMarker = head:FindFirstChild("Y_Friend_Marker")
+        if friendMarker then
+            friendMarker:Destroy()
+        end
+
+        local targetEsp = head:FindFirstChild("Y_Target_ESP")
+        if targetEsp then
+            targetEsp:Destroy()
+        end
+    end
+
+    local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    if torso then
+        local targetEsp = torso:FindFirstChild("Y_Target_ESP")
+        if targetEsp then
+            targetEsp:Destroy()
+        end
+    end
+end
+
+local function clearAllPlayerVisuals(players)
+    for _, player in pairs(players) do
+        if player.Character then
+            clearCharacterVisuals(player.Character)
+        end
+    end
+end
+
+local function disconnectSafe(connection)
+    if connection then
+        pcall(function()
+            connection:Disconnect()
+        end)
+    end
+end
+
+local function shouldTrackPersistentPlayerEsp()
+    local settings = getgenv().aim_settings
+    return settings.esp_enabled or settings.friend_markers
+end
+
+local function clearTrackedPlayerEsp(player, skipVisualCleanup)
+    local entry = State.playerEspRegistry[player]
+    if not entry then return end
+
+    disconnectSafe(entry.headWatcher)
+    disconnectSafe(entry.ancestryWatcher)
+
+    if not skipVisualCleanup and entry.character then
+        clearCharacterVisuals(entry.character)
+    end
+
+    State.playerEspRegistry[player] = nil
+end
+
+local function ensureTrackedPlayerEsp(player, character)
+    if not player or not character then return end
+
+    local entry = State.playerEspRegistry[player]
+    if not entry or entry.character ~= character then
+        clearTrackedPlayerEsp(player, true)
+        entry = {
+            player = player,
+            character = character
+        }
+        State.playerEspRegistry[player] = entry
+    end
+
+    local highlight = character:FindFirstChild("Y_ESP")
+    if not highlight and shouldTrackPersistentPlayerEsp() then
+        highlight = Instance.new("Highlight")
+        highlight.Name = "Y_ESP"
+        highlight.Parent = character
+    end
+    entry.highlight = highlight
+
+    local head = character:FindFirstChild("Head")
+    entry.head = head
+    if head then
+        local textGui = head:FindFirstChild("Y_ESP_Text")
+        if not textGui and shouldTrackPersistentPlayerEsp() then
+            textGui = Instance.new("BillboardGui")
+            textGui.Name = "Y_ESP_Text"
+            textGui.Size = UDim2.new(0, 200, 0, 100)
+            textGui.StudsOffset = Vector3.new(0, 2, 0)
+            textGui.AlwaysOnTop = true
+            textGui.Parent = head
+        end
+        entry.billboardGui = textGui
+
+        local textLabel = textGui and textGui:FindFirstChild("TextLabel")
+        if textGui and not textLabel and shouldTrackPersistentPlayerEsp() then
+            textLabel = Instance.new("TextLabel")
+            textLabel.Size = UDim2.new(1, 0, 1, 0)
+            textLabel.BackgroundTransparency = 1
+            textLabel.Font = Enum.Font.GothamBold
+            textLabel.TextSize = 14
+            textLabel.TextStrokeTransparency = 0.5
+            textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            textLabel.Parent = textGui
+        end
+        entry.textLabel = textLabel
+
+        local friendMarker = head:FindFirstChild("Y_Friend_Marker")
+        if not friendMarker and shouldTrackPersistentPlayerEsp() then
+            friendMarker = Instance.new("BillboardGui")
+            friendMarker.Name = "Y_Friend_Marker"
+            friendMarker.Size = UDim2.new(0, 40, 0, 30)
+            friendMarker.StudsOffset = Vector3.new(0, 3, 0)
+            friendMarker.AlwaysOnTop = true
+            friendMarker.Parent = head
+
+            local diamond = Instance.new("Frame")
+            diamond.Size = UDim2.new(0, 22, 0, 22)
+            diamond.Position = UDim2.new(0.5, -11, 0.5, -11)
+            diamond.AnchorPoint = Vector2.new(0.5, 0.5)
+            diamond.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+            diamond.BorderSizePixel = 0
+            diamond.Rotation = 45
+            diamond.Parent = friendMarker
+
+            local diamondStroke = Instance.new("UIStroke")
+            diamondStroke.Color = Color3.fromRGB(50, 200, 50)
+            diamondStroke.Thickness = 2
+            diamondStroke.Parent = diamond
+        end
+        entry.friendMarker = friendMarker
+    else
+        entry.billboardGui = nil
+        entry.textLabel = nil
+        entry.friendMarker = nil
+    end
+
+    disconnectSafe(entry.headWatcher)
+    entry.headWatcher = character.ChildAdded:Connect(function(child)
+        if child.Name == "Head" then
+            ensureTrackedPlayerEsp(player, character)
+        end
+    end)
+
+    disconnectSafe(entry.ancestryWatcher)
+    entry.ancestryWatcher = character.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            clearTrackedPlayerEsp(player, true)
+        end
+    end)
+end
+
+local function trackPlayerEsp(player)
+    if State.playerEspConnections[player] then
+        return
+    end
+
+    local connections = {}
+    connections.characterAdded = player.CharacterAdded:Connect(function(character)
+        clearTrackedPlayerEsp(player, true)
+        if shouldTrackPersistentPlayerEsp() then
+            ensureTrackedPlayerEsp(player, character)
+        else
+            State.playerEspRegistry[player] = {
+                player = player,
+                character = character
+            }
+        end
+    end)
+    connections.characterRemoving = player.CharacterRemoving:Connect(function(character)
+        clearCharacterVisuals(character)
+        clearTrackedPlayerEsp(player, true)
+    end)
+    State.playerEspConnections[player] = connections
+
+    if player.Character then
+        if shouldTrackPersistentPlayerEsp() then
+            ensureTrackedPlayerEsp(player, player.Character)
+        else
+            State.playerEspRegistry[player] = {
+                player = player,
+                character = player.Character
+            }
+        end
+    end
+end
+
+local function untrackPlayerEsp(player)
+    local connections = State.playerEspConnections[player]
+    if connections then
+        disconnectSafe(connections.characterAdded)
+        disconnectSafe(connections.characterRemoving)
+        State.playerEspConnections[player] = nil
+    end
+
+    clearTrackedPlayerEsp(player)
+end
+
+local function refreshTrackedPlayerEsp()
+    for _, player in ipairs(G.Plr:GetPlayers()) do
+        if player.Character then
+            ensureTrackedPlayerEsp(player, player.Character)
+        end
+    end
+end
+
+local function clearJumpCircles()
+    for i = #State.jumpCircles, 1, -1 do
+        local circle = State.jumpCircles[i]
+        if circle.circlePart then
+            circle.circlePart:Destroy()
+        end
+        table.remove(State.jumpCircles, i)
+    end
+    State.lastJumpState = {}
+    State.jumpCirclesActive = false
+end
+
+local function clearChinaHatState()
+    if State.chinaHat then
+        State.chinaHat:Destroy()
+        State.chinaHat = nil
+    end
+
+    for _, layer in ipairs(State.chinaHatLayers) do
+        if layer then
+            layer:Destroy()
+        end
+    end
+    State.chinaHatLayers = {}
+
+    for playerName, hatData in pairs(State.friendsHats) do
+        destroyChinaHat(hatData)
+        State.friendsHats[playerName] = nil
+    end
+
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj.Name:match("^State.chinaHat") or obj.Name:match("^ChinaHatLayer") then
+            obj:Destroy()
+        end
+    end
+
+    lastCameraMode = nil
+    State.chinaHatActive = false
+end
+
 -- [[ UTILS ]]
 local ColorUtil = {}
 function ColorUtil.getColorStyle(angle)
@@ -1958,6 +2335,7 @@ end
 local MODULE_NAMES = {
     enabled = "Aimbot",
     esp_enabled = "Player ESP",
+    esp_self = "Self ESP",
     target_esp = "Target ESP",
     target_hud = "Target HUD",
     friend_markers = "Friend Markers",
@@ -1977,6 +2355,7 @@ local MODULE_NAMES = {
     smooth_enabled = "Smooth",
     noise_enabled = "Noise",
     esp_chams = "Chams",
+    esp_glow_chams = "Glow Chams",
     click_action = "Friend Add/Rem",
     fullbright = "FullBright",
     always_day = "Always Day",
@@ -1984,6 +2363,7 @@ local MODULE_NAMES = {
     unload_script = "Unload Script",
     hitboxes_enabled = "Hitboxes",
     tp_walk_enabled = "TP Walk",
+    target_strafe_enabled = "Target Strafe",
     infinite_jump_enabled = "Infinite Jump",
     freecam_enabled = "Freecam"
 }
@@ -2203,6 +2583,335 @@ local function getPredictedPosition(part)
     return part.Position + (velocity * prediction)
 end
 
+local function getPingSeconds()
+    local ok, pingValue = pcall(function()
+        return game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    if not ok then
+        return 0
+    end
+    return math.clamp(math.max(0, pingValue) / 1000, 0, 0.18)
+end
+
+local function getTargetStrafePlayer()
+    local rawQuery = tostring(getgenv().aim_settings.target_strafe_target or "")
+    local query = string.lower(rawQuery)
+
+    if query == "" then
+        if State.LockedTarget and State.LockedTarget.Parent then
+            return G.Plr:GetPlayerFromCharacter(State.LockedTarget.Parent)
+        end
+        return nil
+    end
+
+    local bestPlayer = nil
+    local bestScore = math.huge
+
+    for _, player in ipairs(G.Plr:GetPlayers()) do
+        if player ~= G.LP then
+            local nameLower = string.lower(player.Name)
+            local displayLower = string.lower(player.DisplayName or "")
+
+            local score = nil
+            if nameLower == query or displayLower == query then
+                score = 0
+            elseif string.sub(nameLower, 1, #query) == query or string.sub(displayLower, 1, #query) == query then
+                score = 1
+            elseif string.find(nameLower, query, 1, true) or string.find(displayLower, query, 1, true) then
+                score = 2
+            end
+
+            if score then
+                local tieBreaker = math.abs(#player.Name - #query) * 0.01
+                local finalScore = score + tieBreaker
+                if finalScore < bestScore then
+                    bestScore = finalScore
+                    bestPlayer = player
+                end
+            end
+        end
+    end
+
+    return bestPlayer
+end
+
+local function getTargetStrafeCenter(targetRoot)
+    if not targetRoot then
+        return nil
+    end
+
+    local center = targetRoot.Position
+    if getgenv().aim_settings.target_strafe_autopredict then
+        local velocity = targetRoot.AssemblyLinearVelocity or targetRoot.Velocity
+        local horizontalVelocity = Vector3.new(velocity.X, 0, velocity.Z)
+        
+        -- Правильная компенсация: пинг в секундах × скорость = расстояние
+        local ping = getPingSeconds()
+        local predictionStrength = getgenv().aim_settings.target_strafe_prediction_strength or 1.2
+        
+        -- Компенсация = пинг × множитель
+        local compensation = ping * predictionStrength
+        
+        -- Предсказываем позицию: текущая позиция + (скорость × время)
+        center = center + (horizontalVelocity * compensation)
+    end
+
+    return center
+end
+
+local function clearTargetStrafeVisuals()
+    local visuals = State.targetStrafe.visuals
+    if not visuals then
+        State.targetStrafe.visuals = {}
+        return
+    end
+
+    for key, obj in pairs(visuals) do
+        if typeof(obj) == "Instance" and obj then
+            pcall(function()
+                obj:Destroy()
+            end)
+        end
+        visuals[key] = nil
+    end
+end
+
+local function ensureTargetStrafeVisuals()
+    local visuals = State.targetStrafe.visuals
+    if not visuals.folder or not visuals.folder.Parent then
+        clearTargetStrafeVisuals()
+
+        local folder = Instance.new("Folder")
+        folder.Name = "Y_TargetStrafe_PredictedPos"
+        folder.Parent = workspace
+        visuals.folder = folder
+
+        local predictedPart = Instance.new("Part")
+        predictedPart.Name = "PredictedBox"
+        predictedPart.Size = Vector3.new(2.5, 5, 2.5)
+        predictedPart.Anchored = true
+        predictedPart.CanCollide = false
+        predictedPart.CanTouch = false
+        predictedPart.CanQuery = false
+        predictedPart.Material = Enum.Material.ForceField
+        predictedPart.Transparency = 0.85
+        predictedPart.Color = getClientColor()
+        predictedPart.CastShadow = false
+        predictedPart.Parent = folder
+        visuals.predictedPart = predictedPart
+
+        local selectionBox = Instance.new("SelectionBox")
+        selectionBox.Name = "PredictedOutline"
+        selectionBox.LineThickness = 0.03
+        selectionBox.Color3 = getClientColor()
+        selectionBox.SurfaceTransparency = 1
+        selectionBox.Adornee = predictedPart
+        selectionBox.Parent = predictedPart
+        visuals.selectionBox = selectionBox
+
+        local startAnchor = Instance.new("Part")
+        startAnchor.Name = "ArrowStart"
+        startAnchor.Size = Vector3.new(0.2, 0.2, 0.2)
+        startAnchor.Transparency = 1
+        startAnchor.Anchored = true
+        startAnchor.CanCollide = false
+        startAnchor.CanTouch = false
+        startAnchor.CanQuery = false
+        startAnchor.Parent = folder
+        visuals.startAnchor = startAnchor
+
+        local endAnchor = Instance.new("Part")
+        endAnchor.Name = "ArrowEnd"
+        endAnchor.Size = Vector3.new(0.2, 0.2, 0.2)
+        endAnchor.Transparency = 1
+        endAnchor.Anchored = true
+        endAnchor.CanCollide = false
+        endAnchor.CanTouch = false
+        endAnchor.CanQuery = false
+        endAnchor.Parent = folder
+        visuals.endAnchor = endAnchor
+
+        local startAttachment = Instance.new("Attachment")
+        startAttachment.Name = "StartAttachment"
+        startAttachment.Parent = startAnchor
+        visuals.startAttachment = startAttachment
+
+        local endAttachment = Instance.new("Attachment")
+        endAttachment.Name = "EndAttachment"
+        endAttachment.Parent = endAnchor
+        visuals.endAttachment = endAttachment
+
+        local beam = Instance.new("Beam")
+        beam.Name = "PredictedBeam"
+        beam.Attachment0 = startAttachment
+        beam.Attachment1 = endAttachment
+        beam.FaceCamera = true
+        beam.Width0 = 0.2
+        beam.Width1 = 0.05
+        beam.LightEmission = 1
+        beam.LightInfluence = 0
+        beam.Transparency = NumberSequence.new(0.1, 0.25)
+        beam.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, getClientColor()),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
+        })
+        beam.Parent = folder
+        visuals.beam = beam
+    end
+
+    return visuals
+end
+
+local function updateTargetStrafeVisuals(targetRoot, predictedCenter)
+    if not getgenv().aim_settings.target_strafe_predicted_pos or not targetRoot or not predictedCenter then
+        clearTargetStrafeVisuals()
+        return
+    end
+
+    local visuals = ensureTargetStrafeVisuals()
+    local color = getClientColor()
+    local height = math.max(4, targetRoot.Size.Y * 2.5)
+    local boxPosition = Vector3.new(predictedCenter.X, targetRoot.Position.Y, predictedCenter.Z)
+
+    visuals.predictedPart.Size = Vector3.new(2.5, height, 2.5)
+    visuals.predictedPart.CFrame = CFrame.new(boxPosition)
+    visuals.predictedPart.Color = color
+    visuals.selectionBox.Color3 = color
+
+    local startPosition = targetRoot.Position + Vector3.new(0, math.max(1.5, targetRoot.Size.Y * 0.5), 0)
+    local endPosition = boxPosition + Vector3.new(0, math.max(1.5, height * 0.35), 0)
+    visuals.startAnchor.CFrame = CFrame.new(startPosition)
+    visuals.endAnchor.CFrame = CFrame.new(endPosition)
+    visuals.beam.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, color),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
+    })
+end
+
+local function updateTargetStrafe(deltaTime)
+    local s = getgenv().aim_settings
+    local ts = State.targetStrafe
+    local character = G.LP.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+
+    if not s.target_strafe_enabled then
+        if humanoid then
+            humanoid.AutoRotate = true
+        end
+        ts.active = false
+        ts.targetPlayer = nil
+        ts.smoothedCenter = nil
+        ts.lastTargetPosition = nil
+        clearTargetStrafeVisuals()
+        return
+    end
+
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not (character and humanoid and rootPart and humanoid.Health > 0) then
+        if humanoid then
+            humanoid.AutoRotate = true
+        end
+        ts.active = false
+        ts.targetPlayer = nil
+        ts.smoothedCenter = nil
+        ts.lastTargetPosition = nil
+        clearTargetStrafeVisuals()
+        return
+    end
+
+    local targetPlayer = getTargetStrafePlayer()
+    if not targetPlayer or not targetPlayer.Character then
+        humanoid.AutoRotate = true
+        ts.active = false
+        ts.targetPlayer = nil
+        ts.smoothedCenter = nil
+        ts.lastTargetPosition = nil
+        clearTargetStrafeVisuals()
+        return
+    end
+
+    local targetHumanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+    local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not (targetHumanoid and targetRoot and targetHumanoid.Health > 0) then
+        humanoid.AutoRotate = true
+        ts.active = false
+        ts.targetPlayer = nil
+        ts.smoothedCenter = nil
+        ts.lastTargetPosition = nil
+        clearTargetStrafeVisuals()
+        return
+    end
+
+    if ts.targetPlayer ~= targetPlayer then
+        ts.angle = 0
+        ts.smoothedCenter = nil
+        ts.lastTargetPosition = nil
+    end
+
+    ts.active = true
+    ts.targetPlayer = targetPlayer
+    ts.angle = (ts.angle + (s.target_strafe_speed * deltaTime)) % (math.pi * 2)
+
+    local center = getTargetStrafeCenter(targetRoot)
+    if not center then
+        clearTargetStrafeVisuals()
+        return
+    end
+
+    local rawVelocity = targetRoot.AssemblyLinearVelocity or targetRoot.Velocity
+    local targetVelocity = Vector3.new(rawVelocity.X, 0, rawVelocity.Z)
+    local targetSpeed = targetVelocity.Magnitude
+    local currentTargetPosition = Vector3.new(targetRoot.Position.X, 0, targetRoot.Position.Z)
+
+    -- Вычисляем реальную скорость через изменение позиции
+    local derivedVelocity = Vector3.zero
+    if ts.lastTargetPosition and deltaTime > 0 then
+        derivedVelocity = (currentTargetPosition - ts.lastTargetPosition) / deltaTime
+    end
+    ts.lastTargetPosition = currentTargetPosition
+
+    -- Используем максимальную из двух скоростей
+    if derivedVelocity.Magnitude > targetSpeed then
+        targetVelocity = derivedVelocity
+        targetSpeed = derivedVelocity.Magnitude
+    end
+
+    -- Плавное сглаживание центра
+    if not ts.smoothedCenter then
+        ts.smoothedCenter = center
+    else
+        -- Адаптивное сглаживание
+        local smoothSpeed = 15 + math.clamp(targetSpeed / 2, 0, 15)
+        local smoothAlpha = math.clamp(deltaTime * smoothSpeed, 0.3, 0.95)
+        ts.smoothedCenter = ts.smoothedCenter:Lerp(center, smoothAlpha)
+    end
+
+    updateTargetStrafeVisuals(targetRoot, center)
+
+    local radius = math.max(1, s.target_strafe_radius)
+    local offset = Vector3.new(math.cos(ts.angle) * radius, 0, math.sin(ts.angle) * radius)
+    local desiredPosition = Vector3.new(ts.smoothedCenter.X + offset.X, rootPart.Position.Y, ts.smoothedCenter.Z + offset.Z)
+    local lookAt = Vector3.new(ts.smoothedCenter.X, rootPart.Position.Y, ts.smoothedCenter.Z)
+
+    local positionDelta = desiredPosition - rootPart.Position
+    local distance = positionDelta.Magnitude
+    
+    -- Скорость следования
+    local baseSpeed = radius * s.target_strafe_speed * 2.2
+    local speedBoost = math.clamp(targetSpeed / 14, 0, 2)
+    local distanceBoost = math.clamp(distance / radius, 0.7, 1.8)
+    
+    local maxStep = (baseSpeed + speedBoost) * distanceBoost * math.clamp(deltaTime * 60, 1, 1.5)
+    
+    local nextPosition = desiredPosition
+    if distance > maxStep then
+        nextPosition = rootPart.Position + positionDelta.Unit * maxStep
+    end
+
+    humanoid.AutoRotate = false
+    rootPart.CFrame = CFrame.new(nextPosition, lookAt)
+end
+
 -- [[ TP WALK FUNCTION ]]
 local tpwalkConnection = nil
 
@@ -2375,11 +3084,15 @@ end
 -- Главная функция обновления хитбоксов
 local function updateHitboxes()
     if not getgenv().aim_settings.hitboxes_enabled then
-        resetHeadHitboxes()
-        resetBodyHitboxes()
+        if State.hitboxesActive then
+            resetHeadHitboxes()
+            resetBodyHitboxes()
+            State.hitboxesActive = false
+        end
         return
     end
     
+    State.hitboxesActive = true
     local partName = getgenv().aim_settings.hitboxes_part
     local size = getgenv().aim_settings.hitboxes_size
     local transparency = getgenv().aim_settings.hitboxes_transparency
@@ -2408,6 +3121,184 @@ local function updateHitboxes()
                     hrp.CanCollide = false
                 end)
             end
+        end
+    end
+end
+
+-- [[ VIEWMODEL FUNCTIONS ]]
+local VIEWMODEL_MATERIALS = {
+    Default = false,
+    Neon = Enum.Material.Neon,
+    ForceField = Enum.Material.ForceField,
+    Glass = Enum.Material.Glass,
+    SmoothPlastic = Enum.Material.SmoothPlastic,
+    Plastic = Enum.Material.Plastic
+}
+
+local VIEWMODEL_INCLUDE_HINTS = {
+    "viewmodel", "vm", "arm", "hand", "glove", "sleeve", "finger",
+    "weapon", "gun", "knife", "blade", "katana", "rifle", "pistol",
+    "revolver", "smg", "shotgun", "sniper", "tool", "handle", "muzzle", "barrel"
+}
+
+local VIEWMODEL_EXCLUDE_HINTS = {
+    "humanoidrootpart", "rootpart", "root", "head", "torso", "upperleg",
+    "lowerleg", "leg", "foot", "toe"
+}
+
+local VIEWMODEL_CHARACTER_PART_NAMES = {
+    lefthand = true,
+    righthand = true,
+    leftlowerarm = true,
+    rightlowerarm = true,
+    leftupperarm = true,
+    rightupperarm = true,
+    ["left arm"] = true,
+    ["right arm"] = true
+}
+
+local function nameHasHint(text, hints)
+    if not text then return false end
+    local lowerText = string.lower(text)
+    for _, hint in ipairs(hints) do
+        if string.find(lowerText, hint, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function resolveViewmodelMaterial()
+    local materialName = getgenv().aim_settings.viewmodel_material
+    if materialName == "Default" then
+        return nil
+    end
+    return VIEWMODEL_MATERIALS[materialName] or Enum.Material.Neon
+end
+
+local function cacheViewmodelPart(part)
+    if State.viewmodel.originals[part] then return end
+    local specialMesh = part:FindFirstChildOfClass("SpecialMesh")
+    State.viewmodel.originals[part] = {
+        Material = part.Material,
+        Color = part.Color,
+        TextureID = part:IsA("MeshPart") and part.TextureID or nil,
+        MaterialVariant = part.MaterialVariant,
+        SpecialMesh = specialMesh and {
+            TextureId = specialMesh.TextureId,
+            VertexColor = specialMesh.VertexColor
+        } or nil
+    }
+end
+
+local function restoreViewmodelPart(part, original)
+    if not (part and part.Parent and original) then return end
+    pcall(function()
+        part.Material = original.Material
+        part.Color = original.Color
+        part.MaterialVariant = original.MaterialVariant or ""
+        if part:IsA("MeshPart") and original.TextureID ~= nil then
+            part.TextureID = original.TextureID
+        end
+        local specialMesh = part:FindFirstChildOfClass("SpecialMesh")
+        if specialMesh and original.SpecialMesh then
+            specialMesh.TextureId = original.SpecialMesh.TextureId or ""
+            specialMesh.VertexColor = original.SpecialMesh.VertexColor or Vector3.new(1, 1, 1)
+        end
+    end)
+end
+
+local function applyViewmodelVisual(part, desiredMaterial, desiredColor)
+    pcall(function()
+        if desiredMaterial then
+            part.Material = desiredMaterial
+        else
+            part.Material = State.viewmodel.originals[part].Material
+        end
+        part.Color = desiredColor
+        part.MaterialVariant = ""
+
+        if part:IsA("MeshPart") then
+            part.TextureID = ""
+        end
+
+        local specialMesh = part:FindFirstChildOfClass("SpecialMesh")
+        if specialMesh then
+            specialMesh.TextureId = ""
+            specialMesh.VertexColor = Vector3.new(desiredColor.R, desiredColor.G, desiredColor.B)
+        end
+    end)
+end
+
+local function restoreAllViewmodelParts()
+    for part, original in pairs(State.viewmodel.originals) do
+        restoreViewmodelPart(part, original)
+        State.viewmodel.originals[part] = nil
+    end
+end
+
+local function isViewmodelCandidate(part, character, equippedTool, camera)
+    if not (part and part.Parent and part:IsA("BasePart")) then
+        return false
+    end
+
+    local partName = string.lower(part.Name)
+    local parentName = part.Parent and string.lower(part.Parent.Name) or ""
+
+    if nameHasHint(partName, VIEWMODEL_EXCLUDE_HINTS) or nameHasHint(parentName, VIEWMODEL_EXCLUDE_HINTS) then
+        return false
+    end
+
+    if equippedTool and part:IsDescendantOf(equippedTool) then
+        return true
+    end
+
+    return false
+end
+
+local function addViewmodelPartsFromSource(source, foundParts, seenParts, character, equippedTool, camera)
+    if not source then return end
+    for _, descendant in ipairs(source:GetDescendants()) do
+        if not seenParts[descendant] and isViewmodelCandidate(descendant, character, equippedTool, camera) then
+            seenParts[descendant] = true
+            table.insert(foundParts, descendant)
+        end
+    end
+end
+
+local function findViewmodelParts()
+    local camera = workspace.CurrentCamera or G.Cam
+    local character = G.LP.Character
+    local equippedTool = character and character:FindFirstChildOfClass("Tool")
+    local foundParts = {}
+    local seenParts = {}
+
+    addViewmodelPartsFromSource(equippedTool, foundParts, seenParts, character, equippedTool, camera)
+
+    return foundParts
+end
+
+local function updateViewmodel()
+    local settings = getgenv().aim_settings
+    if not settings.viewmodel_enabled then
+        restoreAllViewmodelParts()
+        return
+    end
+
+    local desiredMaterial = resolveViewmodelMaterial()
+    local desiredColor = settings.viewmodel_color
+    local activeParts = {}
+
+    for _, part in ipairs(findViewmodelParts()) do
+        activeParts[part] = true
+        cacheViewmodelPart(part)
+        applyViewmodelVisual(part, desiredMaterial, desiredColor)
+    end
+
+    for part, original in pairs(State.viewmodel.originals) do
+        if not activeParts[part] or not part.Parent then
+            restoreViewmodelPart(part, original)
+            State.viewmodel.originals[part] = nil
         end
     end
 end
@@ -3276,6 +4167,58 @@ function CategoryPanel:addTextBox(name, settingKey, placeholder)
     return frame
 end
 
+function CategoryPanel:addModuleTextBox(moduleData, name, settingKey, placeholder)
+    local frame = Instance.new("Frame", moduleData.settingsList)
+    frame.Size = UDim2.new(1, 0, 0, 44)
+    frame.BackgroundTransparency = 1
+
+    local lbl = Instance.new("TextLabel", frame)
+    lbl.Size = UDim2.new(1, -24, 0, 14)
+    lbl.Position = UDim2.new(0, 12, 0, 2)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = name
+    lbl.TextColor3 = THEME.TEXT_DIM
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local textBoxFrame = Instance.new("Frame", frame)
+    textBoxFrame.Size = UDim2.new(1, -24, 0, 22)
+    textBoxFrame.Position = UDim2.new(0, 12, 0, 20)
+    textBoxFrame.BackgroundColor3 = THEME.MODULE_BG
+    textBoxFrame.BorderSizePixel = 0
+    Instance.new("UICorner", textBoxFrame).CornerRadius = UDim.new(0, 6)
+
+    local textBoxStroke = Instance.new("UIStroke", textBoxFrame)
+    textBoxStroke.Color = THEME.MODULE_STROKE
+    textBoxStroke.Thickness = 1
+
+    local textBox = Instance.new("TextBox", textBoxFrame)
+    textBox.Size = UDim2.new(1, -12, 1, -4)
+    textBox.Position = UDim2.new(0, 6, 0, 2)
+    textBox.BackgroundTransparency = 1
+    textBox.Text = getgenv().aim_settings[settingKey] or ""
+    textBox.PlaceholderText = placeholder or ""
+    textBox.TextColor3 = THEME.TEXT_TITLE
+    textBox.PlaceholderColor3 = THEME.TEXT_DIM
+    textBox.Font = Enum.Font.Gotham
+    textBox.TextSize = 11
+    textBox.TextXAlignment = Enum.TextXAlignment.Left
+    textBox.ClearTextOnFocus = false
+
+    textBox.FocusLost:Connect(function()
+        getgenv().aim_settings[settingKey] = textBox.Text
+    end)
+
+    registerUIRefresher(function()
+        textBox.Text = tostring(getgenv().aim_settings[settingKey] or "")
+    end)
+
+    table.insert(moduleData.settings, frame)
+
+    return frame
+end
+
 local function getVisibleKeybindEntries()
     local entries = {}
 
@@ -3538,6 +4481,7 @@ local function updatePanelAnimation(deltaTime)
     end
 end
 
+do
 -- 1. COMBAT
 local pCombat = CategoryPanel.new("Combat", startX, 50, panelW)
 local mAimbot = pCombat:addModule("Aimbot", "enabled", true)
@@ -3567,7 +4511,9 @@ table.insert(State.panels, pCombat)
 -- 2. VISUALS
 local pVisuals = CategoryPanel.new("Visuals", startX + panelW + gap, 50, panelW)
 local mESP = pVisuals:addModule("Player ESP", "esp_enabled", true)
+pVisuals:addBoolean(mESP, "Self ESP", "esp_self")
 pVisuals:addBoolean(mESP, "Chams", "esp_chams")
+pVisuals:addBoolean(mESP, "Glow Chams", "esp_glow_chams")
 pVisuals:addBoolean(mESP, "Chams Outline", "esp_chams_outline")
 pVisuals:addColorPicker(mESP, "Chams Color", "esp_chams_color")
 pVisuals:addBoolean(mESP, "NameTags", "esp_nametags")
@@ -3609,6 +4555,9 @@ pVisuals:addBoolean(mWorldTweaks, "Color Correction", "world_color_correction_en
 pVisuals:addSlider(mWorldTweaks, "Saturation", "world_saturation", -1, 1, 0.05)
 pVisuals:addSlider(mWorldTweaks, "Contrast", "world_contrast", -1, 1, 0.05)
 pVisuals:addColorPicker(mWorldTweaks, "Tint Color", "world_tint_color")
+local mViewmodel = pVisuals:addModule("Viewmodel", "viewmodel_enabled", true)
+pVisuals:addDropdown(mViewmodel, "Material", "viewmodel_material", {"Neon", "ForceField", "Glass", "SmoothPlastic", "Plastic", "Default"})
+pVisuals:addColorPicker(mViewmodel, "Color", "viewmodel_color")
 local mJumpCircle = pVisuals:addModule("Jump Circle", "jump_circle_enabled", true)
 pVisuals:addSlider(mJumpCircle, "Speed", "jump_circle_speed", 0.1, 2.0, 0.1)
 pVisuals:addSlider(mJumpCircle, "Size", "jump_circle_size", 0.5, 20.0, 0.1)
@@ -3618,7 +4567,7 @@ pVisuals:addDropdown(mClickGui, "Animation", "clickgui_animation", {"First", "Tw
 pVisuals:addBoolean(mClickGui, "Blur", "clickgui_blur")
 pVisuals:addBoolean(mClickGui, "Darken", "clickgui_darken")
 pVisuals:addBoolean(mClickGui, "Image", "clickgui_image")
-pVisuals:addDropdown(mClickGui, "Image Mode", "clickgui_image_mode", {"Vanilla", "Azuki", "mgebrat", "larp", "larp2", "trollface", "Rena", "renagif"})
+pVisuals:addDropdown(mClickGui, "Image Mode", "clickgui_image_mode", {"Vanilla", "Azuki", "mgebrat", "larp", "larp2", "trollface", "Rena", "renagif", "kurumigif"})
 pVisuals:addBoolean(mClickGui, "Animate Trollface", "trollface_animate")
 pVisuals:addBoolean(mClickGui, "Trollface Music", "trollface_music")
 pVisuals:addSlider(mClickGui, "Music Volume", "trollface_volume", 0, 1, 0.1)
@@ -3635,6 +4584,13 @@ table.insert(State.panels, pVisuals)
 local pMove = CategoryPanel.new("Movement", startX + (panelW + gap)*2, 50, panelW)
 local mTPWalk = pMove:addModule("TP Walk", "tp_walk_enabled", true)
 pMove:addSlider(mTPWalk, "Speed", "tp_walk_speed", 1, 10, 0.5)
+local mTargetStrafe = pMove:addModule("Target Strafe", "target_strafe_enabled", true)
+pMove:addModuleTextBox(mTargetStrafe, "Target", "target_strafe_target", "Name / DisplayName / partial")
+pMove:addSlider(mTargetStrafe, "Radius", "target_strafe_radius", 2, 20, 0.5)
+pMove:addSlider(mTargetStrafe, "Speed", "target_strafe_speed", 0.5, 8, 0.1)
+pMove:addBoolean(mTargetStrafe, "AutoPredict", "target_strafe_autopredict")
+pMove:addSlider(mTargetStrafe, "Prediction Strength", "target_strafe_prediction_strength", 0.5, 3.0, 0.1)
+pMove:addBoolean(mTargetStrafe, "PredictedPos", "target_strafe_predicted_pos")
 local mInfJump = pMove:addModule("Infinite Jump", "infinite_jump_enabled", true)
 pMove:addDropdown(mInfJump, "Mode", "infinite_jump_mode", {"Default", "Platform"})
 pMove:addSlider(mInfJump, "Jump Power", "infinite_jump_power", 10, 100, 1)
@@ -3654,10 +4610,13 @@ pMove:addBoolean(mSpeed, "Bypass", "speed_bypass")
 pMove:addSlider(mSpeed, "Jump Interval", "speed_jump_interval", 0.1, 1.0, 0.05)
 pMove:addModule("Safe Walk", "safe_walk_enabled", false)
 local mFly = pMove:addModule("Fly", "fly_enabled", true)
-pMove:addDropdown(mFly, "Mode", "fly_mode", {"Gyro", "CFrame", "Platform", "Velocity", "Tween"})
+pMove:addDropdown(mFly, "Mode", "fly_mode", {"Gyro", "CFrame", "Platform", "Velocity", "Tween", "Climb", "Seat", "Test", "Lags", "Legit"})
 pMove:addSlider(mFly, "Speed", "fly_speed", 0.1, 5, 0.1)
 pMove:addBoolean(mFly, "Bypass AntiCheat", "fly_bypass")
 pMove:addDropdown(mFly, "Bypass Mode", "fly_bypass_mode", {"Velocity", "Teleport", "Hybrid", "Jitter", "Smooth"})
+local mClumsy = pMove:addModule("Clumsy", "clumsy_enabled", true)
+pMove:addSlider(mClumsy, "Speed", "clumsy_speed", 10, 100, 1)
+pMove:addBoolean(mClumsy, "Visualize", "clumsy_visualize")
 table.insert(State.panels, pMove)
 
 -- 4. MISC
@@ -4318,8 +5277,9 @@ spawn(function()
     reloadConfigsFromDisk()
     updateConfigList()
 end)
+end
 
-local ChatPanel = Instance.new("Frame", ScreenGui)
+ChatPanel = Instance.new("Frame", ScreenGui)
 ChatPanel.Name = "ChatPanel"
 ChatPanel.Size = UDim2.new(0, 350, 0, 400)
 ChatPanel.Position = UDim2.new(0, 20, 1, -420)
@@ -4329,20 +5289,20 @@ ChatPanel.Visible = false -- Скрыт по умолчанию
 
 Instance.new("UICorner", ChatPanel).CornerRadius = UDim.new(0, 12)
 
-local chatPanelStroke = Instance.new("UIStroke", ChatPanel)
+chatPanelStroke = Instance.new("UIStroke", ChatPanel)
 chatPanelStroke.Color = THEME.PANEL_STROKE
 chatPanelStroke.Thickness = 2
 
 -- Заголовок чата
-local ChatHeader = Instance.new("Frame", ChatPanel)
+ChatHeader = Instance.new("Frame", ChatPanel)
 ChatHeader.Size = UDim2.new(1, 0, 0, 40)
 ChatHeader.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 ChatHeader.BorderSizePixel = 0
 
-local chatHeaderCorner = Instance.new("UICorner", ChatHeader)
+chatHeaderCorner = Instance.new("UICorner", ChatHeader)
 chatHeaderCorner.CornerRadius = UDim.new(0, 12)
 
-local ChatTitle = Instance.new("TextLabel", ChatHeader)
+ChatTitle = Instance.new("TextLabel", ChatHeader)
 ChatTitle.Size = UDim2.new(1, -80, 1, 0)
 ChatTitle.Position = UDim2.new(0, 15, 0, 0)
 ChatTitle.BackgroundTransparency = 1
@@ -4353,7 +5313,7 @@ ChatTitle.TextSize = 16
 ChatTitle.TextXAlignment = Enum.TextXAlignment.Left
 
 -- Кнопка скрыть/показать
-local ChatToggle = Instance.new("TextButton", ChatHeader)
+ChatToggle = Instance.new("TextButton", ChatHeader)
 ChatToggle.Size = UDim2.new(0, 30, 0, 30)
 ChatToggle.Position = UDim2.new(1, -35, 0.5, -15)
 ChatToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
@@ -4363,11 +5323,11 @@ ChatToggle.Font = Enum.Font.GothamBold
 ChatToggle.TextSize = 16
 ChatToggle.AutoButtonColor = false
 
-local chatToggleCorner = Instance.new("UICorner", ChatToggle)
+chatToggleCorner = Instance.new("UICorner", ChatToggle)
 chatToggleCorner.CornerRadius = UDim.new(0, 6)
 
 -- Область сообщений
-local ChatMessages = Instance.new("ScrollingFrame", ChatPanel)
+ChatMessages = Instance.new("ScrollingFrame", ChatPanel)
 ChatMessages.Size = UDim2.new(1, -10, 1, -90)
 ChatMessages.Position = UDim2.new(0, 5, 0, 45)
 ChatMessages.BackgroundTransparency = 1
@@ -4376,21 +5336,21 @@ ChatMessages.ScrollBarThickness = 4
 ChatMessages.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
 ChatMessages.CanvasSize = UDim2.new(0, 0, 0, 0)
 
-local chatMessagesLayout = Instance.new("UIListLayout", ChatMessages)
+chatMessagesLayout = Instance.new("UIListLayout", ChatMessages)
 chatMessagesLayout.SortOrder = Enum.SortOrder.LayoutOrder
 chatMessagesLayout.Padding = UDim.new(0, 5)
 
 -- Поле ввода
-local ChatInputFrame = Instance.new("Frame", ChatPanel)
+ChatInputFrame = Instance.new("Frame", ChatPanel)
 ChatInputFrame.Size = UDim2.new(1, -10, 0, 35)
 ChatInputFrame.Position = UDim2.new(0, 5, 1, -40)
 ChatInputFrame.BackgroundColor3 = THEME.MODULE_BG
 ChatInputFrame.BorderSizePixel = 0
 
-local chatInputCorner = Instance.new("UICorner", ChatInputFrame)
+chatInputCorner = Instance.new("UICorner", ChatInputFrame)
 chatInputCorner.CornerRadius = UDim.new(0, 8)
 
-local ChatInput = Instance.new("TextBox", ChatInputFrame)
+ChatInput = Instance.new("TextBox", ChatInputFrame)
 ChatInput.Size = UDim2.new(1, -70, 1, -6)
 ChatInput.Position = UDim2.new(0, 8, 0, 3)
 ChatInput.BackgroundTransparency = 1
@@ -4402,7 +5362,7 @@ ChatInput.Font = Enum.Font.Gotham
 ChatInput.TextSize = 12
 ChatInput.TextXAlignment = Enum.TextXAlignment.Left
 
-local ChatSendBtn = Instance.new("TextButton", ChatInputFrame)
+ChatSendBtn = Instance.new("TextButton", ChatInputFrame)
 ChatSendBtn.Size = UDim2.new(0, 55, 1, -6)
 ChatSendBtn.Position = UDim2.new(1, -58, 0, 3)
 ChatSendBtn.BackgroundColor3 = getClientColor()
@@ -4412,12 +5372,12 @@ ChatSendBtn.Font = Enum.Font.GothamBold
 ChatSendBtn.TextSize = 11
 ChatSendBtn.AutoButtonColor = false
 
-local chatSendCorner = Instance.new("UICorner", ChatSendBtn)
+chatSendCorner = Instance.new("UICorner", ChatSendBtn)
 chatSendCorner.CornerRadius = UDim.new(0, 6)
 
 -- Переменные для чата
-local chatMessages = {}
-local chatVisible = false
+chatMessages = {}
+chatVisible = false
 
 -- Функция для добавления сообщения в чат
 local function addChatMessage(username, message, isOwn, timestamp)
@@ -4688,10 +5648,20 @@ local OPTIMIZATION = {
     UPDATE_INTERVAL = 1/60, -- Обновлять некоторые вещи 60 раз в секунду
     HITBOX_UPDATE_INTERVAL = 1/30, -- Хитбоксы 30 раз в секунду
     COLOR_CHECK_INTERVAL = 0.1, -- Проверка цвета 10 раз в секунду
+    VIEWMODEL_UPDATE_INTERVAL = 0.1,
+    ESP_UPDATE_INTERVAL = 1/20,
+    KEYBINDS_UPDATE_INTERVAL = 0.15,
+    ARROWS_UPDATE_INTERVAL = 1/30,
+    ANTIFLING_UPDATE_INTERVAL = 0.25,
 }
 
 local lastHitboxUpdate = 0
 local lastColorCheck = 0
+local lastViewmodelUpdate = 0
+local lastEspUpdate = 0
+local lastKeybindUpdate = 0
+local lastArrowsUpdate = 0
+local lastAntiFlingUpdate = 0
 
 -- Вспомогательные функции для уменьшения локальных переменных в RenderStepped
 local function updateGUIVisibility()
@@ -4803,10 +5773,16 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
         updateHitboxes()
         lastHitboxUpdate = t
     end
+
+    if t - lastViewmodelUpdate >= OPTIMIZATION.VIEWMODEL_UPDATE_INTERVAL then
+        updateViewmodel()
+        lastViewmodelUpdate = t
+    end
     
     updateTPWalk()
     
     local s = getgenv().aim_settings
+    local currentPlayers = G.Plr:GetPlayers()
     if s.infinite_jump_enabled and not IJ.c then
         IJ_I()
     elseif not s.infinite_jump_enabled and IJ.c then
@@ -4849,7 +5825,10 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
     FOVCircle.Radius = s.fov
     FOVCircle.Position = G.UIS:GetMouseLocation()
     
-    for _, p in pairs(G.Plr:GetPlayers()) do
+    local shouldProcessPlayerVisuals = s.target_esp or s.esp_enabled or s.friend_markers
+    if t - lastEspUpdate >= OPTIMIZATION.ESP_UPDATE_INTERVAL then
+    if shouldProcessPlayerVisuals then
+    for _, p in pairs(currentPlayers) do
         if p ~= G.LP and p.Character then
             local tp = s.hitbox == "Head" and p.Character:FindFirstChild("Head") or (p.Character:FindFirstChild("UpperTorso") or p.Character:FindFirstChild("Torso"))
             local h = p.Character:FindFirstChild("Head")
@@ -4985,14 +5964,273 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
         end
     end
     
+    local function clearAuraChams(character)
+        if not character then return end
+        for _, obj in pairs(character:GetDescendants()) do
+            if obj.Name == "Y_ESP_Aura"
+                or obj.Name == "Y_ESP_Aura_Attachment"
+                or obj.Name == "Y_ESP_Glow_Weld" then
+                obj:Destroy()
+            end
+        end
+        local glowFolder = character:FindFirstChild("Y_ESP_Glow")
+        if glowFolder then
+            glowFolder:Destroy()
+        end
+        local glowOutline = character:FindFirstChild("Y_ESP_Glow_Outline")
+        if glowOutline then
+            glowOutline:Destroy()
+        end
+    end
+
+    local function addAuraChams(character, color)
+        if not character then return end
+        local glowFolder = character:FindFirstChild("Y_ESP_Glow") or Instance.new("Folder")
+        glowFolder.Name = "Y_ESP_Glow"
+        glowFolder.Parent = character
+        local validParts = {}
+
+        local function shouldUsePart(part)
+            local name = part.Name
+            if not part:IsA("BasePart") or name == "HumanoidRootPart" then
+                return false
+            end
+
+            return name == "Head"
+                or name == "Torso"
+                or name == "UpperTorso"
+                or name == "LowerTorso"
+                or name == "Left Arm"
+                or name == "Right Arm"
+                or name == "Left Leg"
+                or name == "Right Leg"
+                or string.find(name, "UpperArm")
+                or string.find(name, "LowerArm")
+                or string.find(name, "UpperLeg")
+                or string.find(name, "LowerLeg")
+                or string.find(name, "Hand")
+                or string.find(name, "Foot")
+        end
+
+        local function getShellScale(part)
+            local name = part.Name
+            if name == "Head" then
+                return 0.075, 0.13
+            end
+            if name == "Torso" or name == "UpperTorso" or name == "LowerTorso" then
+                return 0.08, 0.145
+            end
+            return 0.055, 0.105
+        end
+
+        local function stripShell(shell)
+            for _, desc in pairs(shell:GetDescendants()) do
+                if not desc:IsA("SpecialMesh") then
+                    desc:Destroy()
+                end
+            end
+
+            pcall(function()
+                shell.TextureID = ""
+            end)
+        end
+
+        local function setupShell(shell, sourcePart, sizeOffset, material, transparency)
+            shell.CFrame = sourcePart.CFrame
+            shell.Size = Vector3.new(
+                sourcePart.Size.X + sizeOffset,
+                sourcePart.Size.Y + sizeOffset,
+                sourcePart.Size.Z + sizeOffset
+            )
+            shell.Color = color
+            shell.Material = material
+            shell.Transparency = transparency
+            shell.CastShadow = false
+            shell.CanCollide = false
+            shell.CanTouch = false
+            shell.CanQuery = false
+            shell.Massless = true
+            shell.Anchored = false
+        end
+
+        for _, part in pairs(character:GetChildren()) do
+            if shouldUsePart(part) then
+                validParts[part.Name] = true
+
+                local partFolder = glowFolder:FindFirstChild(part.Name)
+                if not partFolder then
+                    partFolder = Instance.new("Folder")
+                    partFolder.Name = part.Name
+                    partFolder.Parent = glowFolder
+                end
+
+                local shellCore = partFolder:FindFirstChild("ShellCore")
+                if not shellCore then
+                    shellCore = part:Clone()
+                    shellCore.Name = "ShellCore"
+                    stripShell(shellCore)
+                    shellCore.Parent = partFolder
+
+                    local weld = Instance.new("WeldConstraint")
+                    weld.Name = "Y_ESP_Glow_Weld"
+                    weld.Part0 = shellCore
+                    weld.Part1 = part
+                    weld.Parent = shellCore
+                end
+
+                local shellRim = partFolder:FindFirstChild("ShellRim")
+                if not shellRim then
+                    shellRim = part:Clone()
+                    shellRim.Name = "ShellRim"
+                    stripShell(shellRim)
+                    shellRim.Parent = partFolder
+
+                    local weld = Instance.new("WeldConstraint")
+                    weld.Name = "Y_ESP_Glow_Weld"
+                    weld.Part0 = shellRim
+                    weld.Part1 = part
+                    weld.Parent = shellRim
+                end
+
+                local coreOffset, rimOffset = getShellScale(part)
+                setupShell(shellCore, part, coreOffset, Enum.Material.Neon, 0.84)
+                setupShell(shellRim, part, rimOffset, Enum.Material.ForceField, 0.58)
+            end
+        end
+
+        for _, folder in pairs(glowFolder:GetChildren()) do
+            if not validParts[folder.Name] then
+                folder:Destroy()
+            end
+        end
+
+        local glowOutline = character:FindFirstChild("Y_ESP_Glow_Outline") or Instance.new("Highlight")
+        glowOutline.Name = "Y_ESP_Glow_Outline"
+        glowOutline.Parent = character
+        glowOutline.Adornee = character
+        glowOutline.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        glowOutline.FillColor = color
+        glowOutline.FillTransparency = 1
+        glowOutline.OutlineColor = color
+        glowOutline.OutlineTransparency = 0.65
+    end
+
     -- ESP Logic
-    for _, p in pairs(G.Plr:GetPlayers()) do
-        if p ~= G.LP and p.Character then
+    local persistentPlayerEspEnabled = shouldTrackPersistentPlayerEsp()
+    if persistentPlayerEspEnabled then
+        if not State.persistentPlayerEspActive then
+            refreshTrackedPlayerEsp()
+        end
+    elseif State.persistentPlayerEspActive then
+        clearAllPlayerVisuals(currentPlayers)
+    end
+
+    for p, entry in pairs(State.playerEspRegistry) do
+        local character = entry.character
+        if character and character.Parent and (p ~= G.LP or getgenv().aim_settings.esp_self) then
+            local isLocalPlayer = p == G.LP
+            local isFriendPlayer = isFriend(p.Name)
+            local shouldHide = false
+
+            if getgenv().aim_settings.esp_hide_team and not isLocalPlayer and G.LP.Team and p.Team == G.LP.Team then
+                shouldHide = true
+            end
+
+            local hl = entry.highlight
+            if hl then
+                hl.Enabled = getgenv().aim_settings.esp_enabled and getgenv().aim_settings.esp_chams and not shouldHide
+                if getgenv().aim_settings.esp_team_color and p.Team then
+                    hl.FillColor = p.Team.TeamColor.Color
+                else
+                    hl.FillColor = getgenv().aim_settings.esp_chams_color
+                end
+                hl.FillTransparency = 0.5
+
+                if getgenv().aim_settings.esp_chams_outline then
+                    hl.OutlineColor = Color3.new(0, 0, 0)
+                    hl.OutlineTransparency = 0
+                else
+                    hl.OutlineTransparency = 1
+                end
+
+                if getgenv().aim_settings.esp_enabled and getgenv().aim_settings.esp_glow_chams and not shouldHide then
+                    addAuraChams(character, hl.FillColor)
+                else
+                    clearAuraChams(character)
+                end
+            else
+                clearAuraChams(character)
+            end
+
+            local head = entry.head
+            local billboardGui = entry.billboardGui
+            local textLabel = entry.textLabel
+            if head and billboardGui and textLabel then
+                local shouldShowText = getgenv().aim_settings.esp_nametags
+                    or getgenv().aim_settings.esp_hp_bar
+                    or getgenv().aim_settings.esp_tool
+                    or getgenv().aim_settings.esp_distance
+
+                billboardGui.Enabled = getgenv().aim_settings.esp_enabled and not shouldHide and shouldShowText
+
+                local hum = character:FindFirstChildOfClass("Humanoid")
+                if hum and G.Cam and G.Cam.CFrame then
+                    local textParts = {}
+
+                    if getgenv().aim_settings.esp_nametags then
+                        table.insert(textParts, p.Name)
+                    end
+
+                    if getgenv().aim_settings.esp_hp_bar then
+                        local health = math.floor(hum.Health)
+                        local maxHealth = math.floor(hum.MaxHealth)
+                        table.insert(textParts, health .. "/" .. maxHealth .. " HP")
+                    end
+
+                    if getgenv().aim_settings.esp_tool then
+                        local tool = character:FindFirstChildOfClass("Tool")
+                        if tool then
+                            table.insert(textParts, "[" .. tool.Name .. "]")
+                        end
+                    end
+
+                    if getgenv().aim_settings.esp_distance then
+                        local distance = math.floor((head.Position - G.Cam.CFrame.Position).Magnitude)
+                        table.insert(textParts, distance .. " studs")
+                    end
+
+                    textLabel.Text = table.concat(textParts, "\n")
+
+                    if getgenv().aim_settings.esp_team_color and p.Team then
+                        textLabel.TextColor3 = p.Team.TeamColor.Color
+                    else
+                        textLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    end
+                end
+            end
+
+            local friendMarker = entry.friendMarker
+            if friendMarker then
+                friendMarker.Enabled = getgenv().aim_settings.friend_markers and isFriendPlayer
+            end
+        elseif character then
+            clearAuraChams(character)
+        end
+    end
+
+    if G.LP.Character and not getgenv().aim_settings.esp_self then
+        clearCharacterVisuals(G.LP.Character)
+    end
+
+    if false then
+    for _, p in pairs(currentPlayers) do
+        if p.Character and (p ~= G.LP or getgenv().aim_settings.esp_self) then
+            local isLocalPlayer = p == G.LP
             local isFriendPlayer = isFriend(p.Name)
             
             -- Проверка Hide Team
             local shouldHide = false
-            if getgenv().aim_settings.esp_hide_team then
+            if getgenv().aim_settings.esp_hide_team and not isLocalPlayer then
                 if G.LP.Team and p.Team == G.LP.Team then
                     shouldHide = true
                 end
@@ -5025,6 +6263,12 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
                 hl.OutlineTransparency = 0
             else
                 hl.OutlineTransparency = 1
+            end
+
+            if getgenv().aim_settings.esp_enabled and getgenv().aim_settings.esp_glow_chams and not shouldHide then
+                addAuraChams(p.Character, hl.FillColor)
+            else
+                clearAuraChams(p.Character)
             end
             
             -- ESP Text Info
@@ -5134,6 +6378,34 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
             end
         end
     end
+
+    if G.LP.Character and not getgenv().aim_settings.esp_self then
+        if G.LP.Character:FindFirstChild("Y_ESP") then
+            G.LP.Character.Y_ESP:Destroy()
+        end
+        clearAuraChams(G.LP.Character)
+
+        local localHead = G.LP.Character:FindFirstChild("Head")
+        if localHead then
+            if localHead:FindFirstChild("Y_ESP_Text") then
+                localHead.Y_ESP_Text:Destroy()
+            end
+            if localHead:FindFirstChild("Y_Friend_Marker") then
+                localHead.Y_Friend_Marker:Destroy()
+            end
+        end
+    end
+    end
+    lastEspUpdate = t
+    State.playerVisualsActive = true
+    State.persistentPlayerEspActive = persistentPlayerEspEnabled
+    elseif State.playerVisualsActive then
+        clearAllPlayerVisuals(currentPlayers)
+        State.playerVisualsActive = false
+        State.persistentPlayerEspActive = false
+        lastEspUpdate = t
+    end
+    end
     
     -- Speed Display
     SpeedLabel.Visible = getgenv().aim_settings.speed_display
@@ -5197,7 +6469,7 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
     
     -- Keybind List Display
     KeybindList.Visible = getgenv().aim_settings.hud_enabled and getgenv().aim_settings.keybind_list_enabled
-    if getgenv().aim_settings.hud_enabled and getgenv().aim_settings.keybind_list_enabled then
+    if getgenv().aim_settings.hud_enabled and getgenv().aim_settings.keybind_list_enabled and t - lastKeybindUpdate >= OPTIMIZATION.KEYBINDS_UPDATE_INTERVAL then
         -- Удаляем старые элементы
         for _, item in pairs(State.keybindItems) do
             if item then item:Destroy() end
@@ -5256,11 +6528,12 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
         
         -- Обновляем размер панели
         tw(KeybindList, {Size = UDim2.new(0, 180, 0, keybindLayout.AbsoluteContentSize.Y + 10)}, 0.2)
+        lastKeybindUpdate = t
     end
     
     -- Arrows Display
     ArrowsContainer.Visible = getgenv().aim_settings.arrows
-    if getgenv().aim_settings.arrows then
+    if getgenv().aim_settings.arrows and t - lastArrowsUpdate >= OPTIMIZATION.ARROWS_UPDATE_INTERVAL then
         -- Анимация радиуса от центра
         targetAnimationStep = getgenv().aim_settings.arrows_radius
         animationStep = animationStep + (targetAnimationStep - animationStep) * 0.1
@@ -5269,7 +6542,7 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
         local screenCenter = Vector2.new(G.Cam.ViewportSize.X / 2, G.Cam.ViewportSize.Y / 2)
         local activePlayers = {}
         
-        for _, p in pairs(G.Plr:GetPlayers()) do
+        for _, p in pairs(currentPlayers) do
             if p ~= G.LP and p.Character then
                 local head = p.Character:FindFirstChild("Head")
                 if head then
@@ -5349,12 +6622,17 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
                 end
             end
         end
+        State.arrowsActive = true
+        lastArrowsUpdate = t
     else
         -- Очищаем все стрелки когда Arrows выключен
-        for _, child in pairs(ArrowsContainer:GetChildren()) do
-            if child:IsA("ImageLabel") then
-                child:Destroy()
+        if not getgenv().aim_settings.arrows and State.arrowsActive then
+            for _, child in pairs(ArrowsContainer:GetChildren()) do
+                if child:IsA("ImageLabel") then
+                    child:Destroy()
+                end
             end
+            State.arrowsActive = false
         end
     end
     
@@ -5363,7 +6641,6 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
     
     if getgenv().aim_settings.hud_enabled and getgenv().aim_settings.watermark_enabled then
         local currentTime = tick()
-        local dt = G.RS.RenderStepped:Wait()
         
         -- Обновляем FPS и Ping раз в секунду
         if currentTime - State.watermark.lastUpdateTime >= 1.0 then
@@ -5421,6 +6698,7 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
     
     -- Jump Circle Logic (только для локального игрока)
     if getgenv().aim_settings.jump_circle_enabled then
+        State.jumpCirclesActive = true
         local player = G.LP
         if player.Character then
             local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
@@ -5599,18 +6877,15 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
             end
         end
     else
-        -- JumpCircle выключен, очищаем все круги
-        for i = #State.jumpCircles, 1, -1 do
-            local circle = State.jumpCircles[i]
-            if circle.circlePart then circle.circlePart:Destroy() end
-            table.remove(State.jumpCircles, i)
+        -- JumpCircle выключен, очищаем круги один раз
+        if State.jumpCirclesActive or #State.jumpCircles > 0 then
+            clearJumpCircles()
         end
-        -- Очищаем состояния прыжков
-        State.lastJumpState = {}
     end
     
     -- China Hat Logic
     if getgenv().aim_settings.cosmetic_enabled and getgenv().aim_settings.china_hat then
+        State.chinaHatActive = true
         local player = G.LP
         if player.Character then
             local head = player.Character:FindFirstChild("Head")
@@ -5656,7 +6931,7 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
         
         -- China Hat для друзей
         if getgenv().aim_settings.china_hat_friends then
-            for _, friendPlayer in pairs(G.Plr:GetPlayers()) do
+            for _, friendPlayer in pairs(currentPlayers) do
                 if friendPlayer ~= G.LP and friendPlayer.Character and isFriend(friendPlayer.Name) then
                     local friendHead = friendPlayer.Character:FindFirstChild("Head")
                     if friendHead then
@@ -5684,34 +6959,10 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
             State.friendsHats = {}
         end
     else
-        -- Cosmetic или China Hat выключен, удаляем все части
-        if State.chinaHat then
-            State.chinaHat:Destroy()
-            State.chinaHat = nil
+        -- Cosmetic или China Hat выключен, удаляем части один раз
+        if State.chinaHatActive or State.chinaHat or next(State.friendsHats) ~= nil or #State.chinaHatLayers > 0 then
+            clearChinaHatState()
         end
-        
-        for _, layer in ipairs(State.chinaHatLayers) do
-            if layer then
-                layer:Destroy()
-            end
-        end
-        State.chinaHatLayers = {}
-        
-        -- Удаляем China Hat всех друзей
-        for playerName, hatData in pairs(State.friendsHats) do
-            destroyChinaHat(hatData)
-        end
-        State.friendsHats = {}
-        
-        -- Дополнительная очистка в workspace
-        for _, obj in pairs(workspace:GetChildren()) do
-            if obj.Name:match("^State.chinaHat") or obj.Name:match("^ChinaHatLayer") then
-                obj:Destroy()
-            end
-        end
-        
-        -- Сбрасываем режим камеры
-        lastCameraMode = nil
     end
     
     -- Trails Logic
@@ -5796,31 +7047,36 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
     
     -- AntiFling Logic
     if getgenv().aim_settings.anti_fling then
-        for _, player in pairs(G.Plr:GetPlayers()) do
-            if player ~= G.LP and player.Character then
-                for _, part in pairs(player.Character:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                        -- Сохраняем оригинальное значение если ещё не сохранено
-                        local key = tostring(part)
-                        if State.originalCanCollide[key] == nil then
-                            State.originalCanCollide[key] = {part = part, value = part.CanCollide}
+        if t - lastAntiFlingUpdate >= OPTIMIZATION.ANTIFLING_UPDATE_INTERVAL then
+            for _, player in pairs(currentPlayers) do
+                if player ~= G.LP and player.Character then
+                    for _, part in pairs(player.Character:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            -- Сохраняем оригинальное значение если ещё не сохранено
+                            local key = tostring(part)
+                            if State.originalCanCollide[key] == nil then
+                                State.originalCanCollide[key] = {part = part, value = part.CanCollide}
+                            end
+                            -- Отключаем коллизию
+                            part.CanCollide = false
                         end
-                        -- Отключаем коллизию
-                        part.CanCollide = false
                     end
                 end
             end
+            lastAntiFlingUpdate = t
         end
     else
         -- AntiFling выключен, восстанавливаем оригинальные значения
-        for key, data in pairs(State.originalCanCollide) do
-            if data.part and data.part.Parent then
-                pcall(function()
-                    data.part.CanCollide = data.value
-                end)
+        if next(State.originalCanCollide) ~= nil then
+            for key, data in pairs(State.originalCanCollide) do
+                if data.part and data.part.Parent then
+                    pcall(function()
+                        data.part.CanCollide = data.value
+                    end)
+                end
             end
+            State.originalCanCollide = {}
         end
-        State.originalCanCollide = {}
     end
     
     -- ClickGui Background Effects
@@ -5944,15 +7200,35 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
                 ClickGuiImage.Size = UDim2.new(0, 240, 0, 460)
                 ClickGuiImage.Position = UDim2.new(1, -260, 1, -450)
                 ClickGuiImage.ScaleType = Enum.ScaleType.Stretch
-                State.renaGif.time = State.renaGif.time + 0.016
-                if State.renaGif.time >= State.renaGif.delay then
-                    State.renaGif.time = 0
-                    State.renaGif.index = State.renaGif.index + 1
-                    if State.renaGif.index > #State.renaGif.frames then
-                        State.renaGif.index = 1
-                    end
+                if not State.renaGif.preloaded and not State.renaGif.preloading and not State.renaGif.preloadAttempted then
+                    preloadGifFrames(State.renaGif)
                 end
-                ClickGuiImage.Image = State.renaGif.frames[State.renaGif.index]
+                local nextFrame = getGifFrame(State.renaGif, dt)
+                if nextFrame and (State.renaGif.lastFrame ~= nextFrame or ClickGuiImage.Image ~= nextFrame) then
+                    State.renaGif.lastFrame = nextFrame
+                    ClickGuiImage.Image = nextFrame
+                end
+                if State.trollface.originalPosition then
+                    ClickGuiImage.Position = State.trollface.originalPosition
+                    State.trollface.originalPosition = nil
+                end
+                if State.trollface.music then
+                    State.trollface.music:Stop()
+                    State.trollface.music:Destroy()
+                    State.trollface.music = nil
+                end
+            elseif getgenv().aim_settings.clickgui_image_mode == "kurumigif" then
+                ClickGuiImage.Size = UDim2.new(0, 240, 0, 460)
+                ClickGuiImage.Position = UDim2.new(1, -260, 1, -450)
+                ClickGuiImage.ScaleType = Enum.ScaleType.Stretch
+                if not State.kurumiGif.preloaded and not State.kurumiGif.preloading and not State.kurumiGif.preloadAttempted then
+                    preloadGifFrames(State.kurumiGif)
+                end
+                local nextFrame = getGifFrame(State.kurumiGif, dt)
+                if nextFrame and (State.kurumiGif.lastFrame ~= nextFrame or ClickGuiImage.Image ~= nextFrame) then
+                    State.kurumiGif.lastFrame = nextFrame
+                    ClickGuiImage.Image = nextFrame
+                end
                 if State.trollface.originalPosition then
                     ClickGuiImage.Position = State.trollface.originalPosition
                     State.trollface.originalPosition = nil
@@ -6249,6 +7525,8 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
         getgenv().aim_settings.china_hat_friends = false
         getgenv().aim_settings.trails_enabled = false
         getgenv().aim_settings.tp_walk_enabled = false
+        getgenv().aim_settings.target_strafe_enabled = false
+        getgenv().aim_settings.target_strafe_predicted_pos = false
         getgenv().aim_settings.infinite_jump_enabled = false
         getgenv().aim_settings.spider_enabled = false
         getgenv().aim_settings.air_stuck_enabled = false
@@ -6294,6 +7572,14 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
             fc.char_anchored = false
         end
         fc.cframe = nil
+
+        if G.LP.Character then
+            local humanoid = G.LP.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                humanoid.AutoRotate = true
+            end
+        end
+        pcall(function() clearTargetStrafeVisuals() end)
         
         -- Отключаем все connections
         for name, connection in pairs(State.connections) do
@@ -6303,6 +7589,11 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
                 end)
             end
         end
+
+        for player, _ in pairs(State.playerEspConnections) do
+            untrackPlayerEsp(player)
+        end
+
         State.connections = {}
         
         -- Очищаем Game Scripts connections
@@ -6442,11 +7733,25 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
             G.Light.ColorShift_Bottom = State.worldTweaks.originalLighting.ColorShiftBottom
         end
         restoreWorldTweaks()
+        restoreAllViewmodelParts()
         
         for _, p in pairs(G.Plr:GetPlayers()) do
             if p.Character then
                 if p.Character:FindFirstChild("Y_ESP") then
                     p.Character.Y_ESP:Destroy()
+                end
+                for _, obj in pairs(p.Character:GetDescendants()) do
+                    if obj.Name == "Y_ESP_Aura"
+                        or obj.Name == "Y_ESP_Aura_Attachment"
+                        or obj.Name == "Y_ESP_Glow_Weld" then
+                        obj:Destroy()
+                    end
+                end
+                if p.Character:FindFirstChild("Y_ESP_Glow") then
+                    p.Character.Y_ESP_Glow:Destroy()
+                end
+                if p.Character:FindFirstChild("Y_ESP_Glow_Outline") then
+                    p.Character.Y_ESP_Glow_Outline:Destroy()
                 end
                 local head = p.Character:FindFirstChild("Head")
                 local torso = p.Character:FindFirstChild("UpperTorso") or p.Character:FindFirstChild("Torso")
@@ -6582,8 +7887,30 @@ local function Fly_Cleanup()
         if State.fly.bodyGyro then State.fly.bodyGyro:Destroy() end
         if State.fly.bodyVelocity then State.fly.bodyVelocity:Destroy() end
         if State.fly.platform then State.fly.platform:Destroy() end
+        if State.fly.climbPart then State.fly.climbPart:Destroy() end
+        if State.fly.weld then State.fly.weld:Destroy() end
+        if State.fly.seat then State.fly.seat:Destroy() end
         if State.fly.bypassTimer then State.fly.bypassTimer:Disconnect() end
         if State.fly.tween then State.fly.tween:Cancel() end
+        
+        -- Удаляем парты из пула (для Legit режима)
+        if State.fly.parts then
+            for _, partData in ipairs(State.fly.parts) do
+                if partData.part then
+                    partData.part:Destroy()
+                end
+            end
+        end
+        
+        -- Восстанавливаем состояния Humanoid
+        if State.fly.hm then
+            State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Climbing, true)
+            State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+            State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Flying, true)
+            State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+            State.fly.hm.WalkSpeed = 16
+        end
+        
         State.fly = {}
     end
 end
@@ -6722,6 +8049,764 @@ local function Fly_Mode_Tween()
     end)
 end
 
+local function Fly_Mode_Climb()
+    -- Создаем ГОРИЗОНТАЛЬНЫЙ парт (как ступенька/блок)
+    State.fly.climbPart = Instance.new("Part", workspace)
+    State.fly.climbPart.Name = "ClimbPart"
+    State.fly.climbPart.Size = Vector3.new(6, 0.4, 6) -- ГОРИЗОНТАЛЬНАЯ плитка
+    State.fly.climbPart.Anchored = true
+    State.fly.climbPart.CanCollide = true
+    State.fly.climbPart.Transparency = 0.7 -- Видимый для дебага
+    State.fly.climbPart.Color = Color3.fromRGB(0, 255, 0) -- Зеленый
+    State.fly.climbPart.Material = Enum.Material.Neon
+    State.fly.climbPart.CastShadow = false
+    State.fly.climbPart.CanQuery = false
+    
+    State.fly.lastMoveDir = Vector3.new(0, 0, 1) -- Направление по умолчанию
+    State.fly.lastBypassTime = tick()
+    State.fly.bypassPhase = 0
+    
+    State.fly.connection = G.RS.Heartbeat:Connect(function()
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr and State.fly.climbPart) then 
+            Fly_Cleanup() 
+            return 
+        end
+        
+        local hm = State.fly.hm
+        if not hm then Fly_Cleanup() return end
+        
+        -- Получаем направление движения от Humanoid
+        local moveDir = hm.MoveDirection
+        
+        -- Если персонаж двигается, обновляем направление
+        if moveDir.Magnitude > 0.1 then
+            State.fly.lastMoveDir = moveDir.Unit
+        end
+        
+        -- Получаем размер HumanoidRootPart
+        local hrpSize = State.fly.hr.Size
+        local hrpRadius = math.max(hrpSize.X, hrpSize.Z) / 2
+        
+        -- Парт должен быть ВПЕРЕДИ по направлению движения
+        local forwardDistance = hrpRadius + 2.6 -- Дальше на 0.1 стад
+        local forwardOffset = State.fly.lastMoveDir * forwardDistance
+        
+        -- Поднимаем парт ВЫШЕ
+        local verticalOffset = Vector3.new(0, -hrpSize.Y * 0.3, 0) -- Выше чем было
+        
+        local partPosition = State.fly.hr.Position + forwardOffset + verticalOffset
+        
+        -- Применяем bypass если включен
+        if State.flyS.fly_bypass then
+            local bMode = State.flyS.fly_bypass_mode
+            
+            if bMode == "Jitter" then
+                -- Добавляем случайное дрожание к позиции парта
+                partPosition = partPosition + Vector3.new(
+                    math.random(-10, 10) / 100,
+                    math.random(-10, 10) / 100,
+                    math.random(-10, 10) / 100
+                )
+            elseif bMode == "Teleport" then
+                -- Периодически телепортируем парт
+                if tick() - State.fly.lastBypassTime > 0.1 then
+                    partPosition = partPosition + Vector3.new(
+                        math.random(-20, 20) / 100,
+                        math.random(-20, 20) / 100,
+                        math.random(-20, 20) / 100
+                    )
+                    State.fly.lastBypassTime = tick()
+                end
+            elseif bMode == "Hybrid" then
+                -- Комбинация Velocity и Teleport
+                if tick() - State.fly.lastBypassTime > 0.15 then
+                    partPosition = partPosition + Vector3.new(
+                        math.random(-15, 15) / 100,
+                        math.random(-15, 15) / 100,
+                        math.random(-15, 15) / 100
+                    )
+                    State.fly.lastBypassTime = tick()
+                end
+            elseif bMode == "Smooth" then
+                -- Плавное движение парта
+                State.fly.bypassPhase = State.fly.bypassPhase + 0.05
+                partPosition = partPosition + Vector3.new(
+                    math.sin(State.fly.bypassPhase) * 0.1,
+                    math.cos(State.fly.bypassPhase * 2) * 0.05,
+                    math.sin(State.fly.bypassPhase * 1.5) * 0.1
+                )
+            end
+        end
+        
+        -- Размещаем ГОРИЗОНТАЛЬНЫЙ парт
+        State.fly.climbPart.CFrame = CFrame.new(partPosition)
+        
+        -- Принудительно ставим Humanoid в состояние Climbing
+        if hm:GetState() ~= Enum.HumanoidStateType.Climbing then
+            hm:ChangeState(Enum.HumanoidStateType.Climbing)
+        end
+        
+        -- КОНТРОЛЬ СКОРОСТИ - убираем ускорение
+        local currentVel = State.fly.hr.Velocity
+        local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
+        local horizontalSpeed = horizontalVel.Magnitude
+        
+        -- Ограничиваем горизонтальную скорость
+        local maxSpeed = 16 * State.flyS.fly_speed -- Нормальная скорость ходьбы
+        if horizontalSpeed > maxSpeed then
+            local limitedVel = horizontalVel.Unit * maxSpeed
+            State.fly.hr.Velocity = Vector3.new(limitedVel.X, currentVel.Y, limitedVel.Z)
+        end
+        
+        -- Применяем bypass к velocity если включен
+        if State.flyS.fly_bypass then
+            local bMode = State.flyS.fly_bypass_mode
+            
+            if bMode == "Velocity" then
+                -- Добавляем случайные колебания к velocity
+                State.fly.hr.Velocity = State.fly.hr.Velocity + Vector3.new(
+                    math.random(-5, 5),
+                    math.random(-3, 3),
+                    math.random(-5, 5)
+                )
+            elseif bMode == "Jitter" then
+                -- Резкие изменения velocity
+                if tick() - State.fly.lastBypassTime > 0.05 then
+                    State.fly.hr.Velocity = State.fly.hr.Velocity + Vector3.new(
+                        math.random(-10, 10),
+                        math.random(-5, 5),
+                        math.random(-10, 10)
+                    )
+                end
+            end
+        end
+        
+        -- Ограничиваем вертикальную скорость
+        if currentVel.Y > 20 then
+            State.fly.hr.Velocity = Vector3.new(currentVel.X, 20, currentVel.Z)
+        elseif currentVel.Y < -20 then
+            State.fly.hr.Velocity = Vector3.new(currentVel.X, -20, currentVel.Z)
+        end
+    end)
+end
+
+local function Fly_Mode_Seat()
+    -- Создаем невидимое сиденье
+    State.fly.seat = Instance.new("Seat", workspace)
+    State.fly.seat.Name = "FlySeat"
+    State.fly.seat.Size = Vector3.new(2, 0.5, 2)
+    State.fly.seat.Anchored = false
+    State.fly.seat.CanCollide = false
+    State.fly.seat.Transparency = 1
+    State.fly.seat.CastShadow = false
+    
+    -- Позиционируем сиденье
+    State.fly.seat.CFrame = State.fly.hr.CFrame * CFrame.new(0, -2, 0)
+    
+    -- Делаем сиденье невесомым
+    local bodyVelocity = Instance.new("BodyVelocity", State.fly.seat)
+    bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    State.fly.bodyVelocity = bodyVelocity
+    
+    local bodyGyro = Instance.new("BodyGyro", State.fly.seat)
+    bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    bodyGyro.P = 9e4
+    State.fly.bodyGyro = bodyGyro
+    
+    -- Принудительно сажаем персонажа
+    State.fly.hm.Sit = true
+    
+    -- Создаем Weld чтобы привязать персонажа к сиденью
+    local weld = Instance.new("Weld", State.fly.seat)
+    weld.Part0 = State.fly.seat
+    weld.Part1 = State.fly.hr
+    weld.C0 = CFrame.new(0, 2, 0)
+    State.fly.weld = weld
+    
+    State.fly.connection = G.RS.Heartbeat:Connect(function()
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr and State.fly.seat and State.fly.bodyVelocity and State.fly.bodyGyro) then 
+            Fly_Cleanup() 
+            return 
+        end
+        
+        local hm = State.fly.hm
+        if not hm then Fly_Cleanup() return end
+        
+        -- Управление направлением
+        State.fly.bodyGyro.CFrame = G.Cam.CFrame
+        
+        -- Получаем направление движения
+        getFlyMoveDirection()
+        
+        -- Применяем движение с bypass
+        if State.fly.bypass then
+            local bMode = State.fly.bMode
+            if bMode == "Jitter" and tick() - State.fly.lastVel > 0.03 then
+                State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50) + Vector3.new(math.random(-10, 10)/10, math.random(-10, 10)/10, math.random(-10, 10)/10)
+                State.fly.lastVel = tick()
+            elseif bMode == "Smooth" then
+                State.fly.bodyVelocity.Velocity = State.fly.bodyVelocity.Velocity:Lerp(State.flyDir * (State.flyS.fly_speed * 50), 0.1)
+            elseif bMode == "Velocity" then
+                State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50) + Vector3.new(math.random(-15, 15), math.random(-15, 15), math.random(-15, 15))
+            elseif bMode == "Teleport" and tick() - State.fly.lastVel > 0.1 then
+                State.fly.seat.CFrame = State.fly.seat.CFrame + State.flyDir * (State.flyS.fly_speed * 2)
+                State.fly.lastVel = tick()
+            elseif bMode == "Hybrid" then
+                if tick() - State.fly.lastVel > 0.08 then
+                    State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50) + Vector3.new(math.random(-20, 20), math.random(-10, 10), math.random(-20, 20))
+                    State.fly.lastVel = tick()
+                else
+                    State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50)
+                end
+            else
+                State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50)
+            end
+        else
+            State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50)
+        end
+    end)
+end
+
+local function Fly_Mode_Test()
+    -- Режим Test - комбинация всех техник обхода античита
+    State.fly.testMode = "natural" -- natural, hover, climb, diagonal
+    State.fly.lastGroundTouch = tick()
+    State.fly.touchCooldown = 0
+    State.fly.microOffset = 0
+    State.fly.naturalPhase = 0
+    
+    -- Добавляем BodyGyro для контроля вращения
+    State.fly.bodyGyro = Instance.new("BodyGyro", State.fly.hr)
+    State.fly.bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    State.fly.bodyGyro.P = 9e4
+    State.fly.bodyGyro.D = 500
+    
+    State.fly.connection = G.RS.Heartbeat:Connect(function(dt)
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr and State.fly.hm) then 
+            Fly_Cleanup() 
+            return 
+        end
+        
+        -- Контроль вращения камерой
+        State.fly.bodyGyro.CFrame = G.Cam.CFrame
+        
+        getFlyMoveDirection()
+        local moveSpeed = State.flyS.fly_speed * 16
+        
+        -- Микроколебания для имитации естественного движения
+        State.fly.microOffset = State.fly.microOffset + dt * 3
+        local microShake = Vector3.new(
+            math.sin(State.fly.microOffset * 2.3) * 0.02,
+            math.sin(State.fly.microOffset * 1.7) * 0.015,
+            math.sin(State.fly.microOffset * 2.1) * 0.02
+        )
+        
+        -- Естественное движение с плавным подъемом
+        if State.flyDir.Magnitude > 0 then
+            local horizontal = Vector3.new(State.flyDir.X, 0, State.flyDir.Z).Unit
+            local verticalComponent = State.flyDir.Y
+            
+            -- Диагональный подъем (выглядит естественно)
+            local targetVel = horizontal * moveSpeed + Vector3.new(0, verticalComponent * moveSpeed * 0.6, 0)
+            
+            -- Добавляем микроколебания
+            targetVel = targetVel + microShake
+            
+            -- Плавное изменение velocity
+            State.fly.hr.Velocity = State.fly.hr.Velocity:Lerp(targetVel, 0.15)
+        else
+            -- Ровная высота с микроколебаниями
+            local currentVel = State.fly.hr.Velocity
+            State.fly.hr.Velocity = Vector3.new(
+                currentVel.X * 0.9,
+                math.sin(State.fly.microOffset) * 0.5, -- Микроколебания по Y
+                currentVel.Z * 0.9
+            )
+        end
+        
+        -- Ложные посадки - периодически касаемся земли
+        if tick() - State.fly.lastGroundTouch > math.random(3, 6) then
+            -- Быстро опускаемся и поднимаемся
+            State.fly.touchCooldown = 0.3
+            State.fly.lastGroundTouch = tick()
+        end
+        
+        if State.fly.touchCooldown > 0 then
+            State.fly.touchCooldown = State.fly.touchCooldown - dt
+            -- Быстрое касание земли
+            local downSpeed = 30
+            State.fly.hr.Velocity = Vector3.new(State.fly.hr.Velocity.X, -downSpeed, State.fly.hr.Velocity.Z)
+            
+            -- Проверяем касание земли
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = {State.fly.ch}
+            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+            local ray = workspace:Raycast(State.fly.hr.Position, Vector3.new(0, -5, 0), rayParams)
+            
+            if ray or State.fly.touchCooldown <= 0 then
+                -- Быстро поднимаемся обратно
+                State.fly.hr.Velocity = Vector3.new(State.fly.hr.Velocity.X, 25, State.fly.hr.Velocity.Z)
+                State.fly.touchCooldown = 0
+            end
+        end
+        
+        -- Избегаем состояния Freefall
+        if State.fly.hm:GetState() == Enum.HumanoidStateType.Freefall then
+            State.fly.hm:ChangeState(Enum.HumanoidStateType.Flying)
+        end
+    end)
+end
+
+local function Fly_Mode_Lags()
+    -- Режим Lags - замораживаем сетевые пакеты для имитации лагов
+    State.fly.bodyGyro = Instance.new("BodyGyro", State.fly.hr)
+    State.fly.bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    State.fly.bodyGyro.P = 9e4
+    
+    State.fly.bodyVelocity = Instance.new("BodyVelocity", State.fly.hr)
+    State.fly.bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    State.fly.bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    
+    -- Замораживаем network replication
+    State.fly.lagPhase = 0
+    State.fly.lagDuration = 0
+    State.fly.isLagging = false
+    State.fly.savedPosition = State.fly.hr.CFrame
+    
+    -- Отключаем network ownership для создания эффекта лага
+    pcall(function()
+        State.fly.hr:SetNetworkOwner(nil)
+    end)
+    
+    State.fly.connection = G.RS.Heartbeat:Connect(function(dt)
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr and State.fly.bodyGyro and State.fly.bodyVelocity) then 
+            Fly_Cleanup() 
+            return 
+        end
+        
+        State.fly.bodyGyro.CFrame = G.Cam.CFrame
+        getFlyMoveDirection()
+        
+        -- Цикл лагов: двигаемся -> замораживаемся -> двигаемся
+        State.fly.lagPhase = State.fly.lagPhase + dt
+        
+        if not State.fly.isLagging then
+            -- Фаза движения (0.5-1 секунда)
+            State.fly.bodyVelocity.Velocity = State.flyDir * (State.flyS.fly_speed * 50)
+            
+            if State.fly.lagPhase > math.random(50, 100) / 100 then
+                -- Начинаем лаг
+                State.fly.isLagging = true
+                State.fly.savedPosition = State.fly.hr.CFrame
+                State.fly.lagDuration = math.random(20, 50) / 100 -- 0.2-0.5 секунд лага
+                State.fly.lagPhase = 0
+            end
+        else
+            -- Фаза лага - замораживаем позицию
+            State.fly.bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            
+            -- Принудительно возвращаем на сохраненную позицию (имитация заморозки пакетов)
+            State.fly.hr.CFrame = State.fly.savedPosition
+            State.fly.hr.Velocity = Vector3.new(0, 0, 0)
+            State.fly.hr.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            
+            State.fly.lagPhase = State.fly.lagPhase + dt
+            
+            if State.fly.lagPhase >= State.fly.lagDuration then
+                -- Заканчиваем лаг
+                State.fly.isLagging = false
+                State.fly.lagPhase = 0
+            end
+        end
+    end)
+end
+
+local function Fly_Mode_Legit()
+    -- ═══════════════════════════════════════════════════════════════════════════
+    -- LEGIT FLY - SCAFFOLD MODE V2 (Без джиттера)
+    -- ═══════════════════════════════════════════════════════════════════════════
+    -- Стратегия:
+    -- 1. Создаём БОЛЬШУЮ платформу под ногами (персонаж всегда на ней)
+    -- 2. Платформа плавно движется вместе с персонажем
+    -- 3. НЕТ коррекции Velocity = НЕТ джиттера
+    -- 4. Персонаж ХОДИТ по платформе (состояние Running)
+    -- ═══════════════════════════════════════════════════════════════════════════
+    
+    -- Инициализация
+    State.fly.platform = nil
+    State.fly.targetHeight = State.fly.hr.Position.Y
+    State.fly.heightChangeSpeed = 0.4 -- Скорость изменения высоты
+    State.fly.smoothing = 0.15 -- Плавность движения платформы
+    
+    -- Создаём платформу
+    State.fly.platform = Instance.new("Part")
+    State.fly.platform.Size = Vector3.new(12, 1, 12) -- Большая платформа
+    State.fly.platform.Transparency = 1
+    State.fly.platform.Anchored = true
+    State.fly.platform.CanCollide = true
+    State.fly.platform.Name = "LegitPlatform_" .. math.random(1000, 9999)
+    State.fly.platform.Material = Enum.Material.SmoothPlastic
+    State.fly.platform.CastShadow = false
+    State.fly.platform.Position = State.fly.hr.Position - Vector3.new(0, 3, 0)
+    State.fly.platform.Parent = workspace
+    
+    -- Отключаем сетевую репликацию
+    pcall(function()
+        State.fly.platform:SetNetworkOwner(nil)
+    end)
+    
+    -- Сохраняем оригинальные значения
+    State.fly.originalWalkSpeed = State.fly.hm.WalkSpeed
+    State.fly.originalJumpPower = State.fly.hm.JumpPower
+    State.fly.originalJumpHeight = State.fly.hm.JumpHeight
+    
+    -- Настройка Humanoid
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Flying, false)
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Swimming, false)
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+    
+    -- Безопасная высота прыжка
+    if State.fly.hm.UseJumpPower then
+        State.fly.hm.JumpPower = 20
+    else
+        State.fly.hm.JumpHeight = 2
+    end
+    
+    State.fly.connection = G.RS.Heartbeat:Connect(function(dt)
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr and State.fly.hm and State.fly.platform) then 
+            -- Удаляем платформу при выключении
+            if State.fly.platform then
+                pcall(function() State.fly.platform:Destroy() end)
+                State.fly.platform = nil
+            end
+            Fly_Cleanup() 
+            return 
+        end
+        
+        getFlyMoveDirection()
+        
+        local moveSpeed = State.flyS.fly_speed * 16
+        local hrPos = State.fly.hr.Position
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- УПРАВЛЕНИЕ ЦЕЛЕВОЙ ВЫСОТОЙ
+        -- ═══════════════════════════════════════════════════════════════════════
+        if State.flyDir.Y > 0 then
+            -- Движение вверх
+            State.fly.targetHeight = State.fly.targetHeight + (State.fly.heightChangeSpeed * dt * 60)
+        elseif State.flyDir.Y < 0 then
+            -- Движение вниз
+            State.fly.targetHeight = State.fly.targetHeight - (State.fly.heightChangeSpeed * dt * 60)
+        end
+        
+        -- Проверяем землю
+        local rayParams = RaycastParams.new()
+        rayParams.FilterDescendantsInstances = {State.fly.ch, State.fly.platform}
+        rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+        
+        local rayResult = workspace:Raycast(hrPos, Vector3.new(0, -100, 0), rayParams)
+        
+        if rayResult then
+            local groundHeight = rayResult.Position.Y
+            State.fly.targetHeight = math.max(State.fly.targetHeight, groundHeight + 3)
+        end
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- ПЛАВНОЕ ДВИЖЕНИЕ ПЛАТФОРМЫ (без джиттера)
+        -- ═══════════════════════════════════════════════════════════════════════
+        local currentPlatformPos = State.fly.platform.Position
+        local targetPlatformY = State.fly.targetHeight - 3
+        
+        -- Плавная интерполяция позиции платформы
+        local newPlatformPos = Vector3.new(
+            hrPos.X,
+            currentPlatformPos.Y + ((targetPlatformY - currentPlatformPos.Y) * State.fly.smoothing),
+            hrPos.Z
+        )
+        
+        State.fly.platform.Position = newPlatformPos
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- ГОРИЗОНТАЛЬНОЕ ДВИЖЕНИЕ
+        -- ═══════════════════════════════════════════════════════════════════════
+        if State.flyDir.Magnitude > 0 then
+            State.fly.hm.WalkSpeed = moveSpeed
+            
+            -- Обычное движение через Humanoid
+            local horizontalDir = Vector3.new(State.flyDir.X, 0, State.flyDir.Z)
+            if horizontalDir.Magnitude > 0 then
+                State.fly.hm:Move(horizontalDir, false)
+            end
+        else
+            State.fly.hm.WalkSpeed = State.fly.originalWalkSpeed
+        end
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- ОГРАНИЧЕНИЯ (только для экстремальных случаев)
+        -- ═══════════════════════════════════════════════════════════════════════
+        local currentVel = State.fly.hr.Velocity
+        
+        -- Ограничение только если скорость ОЧЕНЬ большая
+        if currentVel.Y > 15 then
+            State.fly.hr.Velocity = Vector3.new(currentVel.X, 15, currentVel.Z)
+        elseif currentVel.Y < -60 then
+            State.fly.hr.Velocity = Vector3.new(currentVel.X, -60, currentVel.Z)
+        end
+        
+        -- Ограничение горизонтальной скорости
+        local horizontalSpeed = math.sqrt(currentVel.X^2 + currentVel.Z^2)
+        if horizontalSpeed > moveSpeed * 1.3 then
+            local scale = (moveSpeed * 1.3) / horizontalSpeed
+            State.fly.hr.Velocity = Vector3.new(
+                currentVel.X * scale,
+                currentVel.Y,
+                currentVel.Z * scale
+            )
+        end
+    end)
+end
+
+local function Fly_Init()
+    Fly_Cleanup()
+    if not getgenv().aim_settings.fly_enabled then return end
+    
+    State.fly = {ch = G.LP.Character}
+    if not State.fly.ch then return end
+    State.fly.hr = State.fly.ch:FindFirstChild("HumanoidRootPart")
+    State.fly.hm = State.fly.ch:FindFirstChildOfClass("Humanoid")
+    if not State.fly.hr then return end
+    
+    State.flyS = getgenv().aim_settings
+    State.fly.mode = State.flyS.fly_mode
+    State.fly.stateChangeDelay = 0.15
+    
+    -- Создаём пул невидимых платформ с улучшенными свойствами
+    for i = 1, State.fly.maxParts do
+        local part = Instance.new("Part")
+        -- Рандомизация размера для обхода детекта паттернов
+        local sizeVariation = (math.random(70, 90) / 10)
+        part.Size = Vector3.new(sizeVariation, 0.4, sizeVariation)
+        part.Transparency = 1
+        part.Anchored = true
+        part.CanCollide = true
+        part.Name = "LP_" .. math.random(1000, 9999)
+        part.Material = Enum.Material.ForceField
+        part.CastShadow = false
+        part.Parent = workspace
+        
+        -- Отключаем сетевую репликацию
+        pcall(function()
+            part:SetNetworkOwner(nil)
+        end)
+        
+        -- Делаем парт невидимым через дополнительные свойства
+        pcall(function()
+            part.LocalTransparencyModifier = 1
+        end)
+        
+        table.insert(State.fly.parts, {
+            part = part, 
+            spawnTime = 0, 
+            active = false,
+            offset = Vector3.new(math.random(-10, 10) / 100, 0, math.random(-10, 10) / 100)
+        })
+    end
+    
+    -- BodyGyro для плавного поворота
+    State.fly.bodyGyro = Instance.new("BodyGyro", State.fly.hr)
+    State.fly.bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    State.fly.bodyGyro.P = 8e4 -- Немного снижено для плавности
+    State.fly.bodyGyro.D = 500 -- Добавлено демпфирование
+    
+    -- Настройка состояний Humanoid для легитимности
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Climbing, false)
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true) -- Разрешаем падение
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Flying, false)
+    State.fly.hm:SetStateEnabled(Enum.HumanoidStateType.Freefall, true) -- Разрешаем свободное падение
+    
+    -- Сохраняем оригинальные значения
+    State.fly.originalWalkSpeed = State.fly.hm.WalkSpeed
+    State.fly.originalJumpPower = State.fly.hm.JumpPower
+    
+    State.fly.connection = G.RS.Heartbeat:Connect(function(dt)
+        if not (State.flyS.fly_enabled and State.fly.ch and State.fly.hr and State.fly.hm and State.fly.bodyGyro) then 
+            Fly_Cleanup() 
+            return 
+        end
+        
+        -- Плавное вращение камеры
+        State.fly.bodyGyro.CFrame = State.fly.bodyGyro.CFrame:Lerp(G.Cam.CFrame, 0.15)
+        getFlyMoveDirection()
+        
+        local moveSpeed = State.flyS.fly_speed * 16
+        local currentTime = tick()
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- ПРОВЕРКА БЛИЗОСТИ К ЗЕМЛЕ (для адаптивного поведения)
+        -- ═══════════════════════════════════════════════════════════════════════
+        if currentTime - State.fly.lastGroundCheck >= State.fly.groundCheckInterval then
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = {State.fly.ch}
+            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+            
+            local rayResult = workspace:Raycast(
+                State.fly.hr.Position, 
+                Vector3.new(0, -15, 0), 
+                rayParams
+            )
+            
+            State.fly.isNearGround = rayResult ~= nil
+            State.fly.lastGroundCheck = currentTime
+        end
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- МИКРО-КОЛЕБАНИЯ ДЛЯ ЕСТЕСТВЕННОСТИ
+        -- ═══════════════════════════════════════════════════════════════════════
+        State.fly.microTime = State.fly.microTime + dt
+        State.fly.microOffset = Vector3.new(
+            math.sin(State.fly.microTime * 3.2) * 0.015,
+            math.sin(State.fly.microTime * 2.1) * 0.02 + math.cos(State.fly.microTime * 1.5) * 0.015,
+            math.cos(State.fly.microTime * 2.8) * 0.015
+        )
+        
+        -- Вариация высоты для имитации неровной ходьбы
+        State.fly.heightVariation = math.sin(State.fly.microTime * 4.5) * 0.08
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- УПРАВЛЕНИЕ ПЛАТФОРМАМИ
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- Удаляем старые платформы
+        for i, partData in ipairs(State.fly.parts) do
+            if partData.active and (currentTime - partData.spawnTime) > State.fly.partLifetime then
+                -- Плавно опускаем платформу вниз перед удалением
+                tw(partData.part, {CFrame = CFrame.new(0, -1000, 0)}, 0.2)
+                task.delay(0.2, function()
+                    if partData.part then
+                        partData.part.CFrame = CFrame.new(0, -1000, 0)
+                    end
+                end)
+                partData.active = false
+            end
+        end
+        
+        -- Создаём новую платформу с рандомизированным интервалом
+        local spawnInterval = 0.25 + math.random() * 0.15 -- 0.25-0.4 секунды
+        if currentTime >= State.fly.nextPartTime then
+            local partData = State.fly.parts[State.fly.partIndex]
+            
+            if partData then
+                local hrPos = State.fly.hr.Position
+                
+                -- Позиция платформы с учётом микро-колебаний и вариации
+                local partYOffset = -3.2 + State.fly.heightVariation
+                local partPos = Vector3.new(
+                    hrPos.X + partData.offset.X + State.fly.microOffset.X,
+                    hrPos.Y + partYOffset,
+                    hrPos.Z + partData.offset.Z + State.fly.microOffset.Z
+                )
+                
+                -- Рандомизация угла поворота платформы
+                local randomRotation = CFrame.Angles(
+                    math.rad(math.random(-2, 2)),
+                    math.rad(math.random(0, 360)),
+                    math.rad(math.random(-2, 2))
+                )
+                
+                partData.part.CFrame = CFrame.new(partPos) * randomRotation
+                partData.spawnTime = currentTime
+                partData.active = true
+                State.fly.currentPart = partData.part
+            end
+            
+            -- Переход к следующей платформе
+            State.fly.partIndex = State.fly.partIndex + 1
+            if State.fly.partIndex > State.fly.maxParts then
+                State.fly.partIndex = 1
+            end
+            
+            State.fly.nextPartTime = currentTime + spawnInterval
+        end
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- ДВИЖЕНИЕ С АДАПТИВНОЙ ФИЗИКОЙ
+        -- ═══════════════════════════════════════════════════════════════════════
+        if State.flyDir.Magnitude > 0 then
+            -- Адаптивная скорость в зависимости от близости к земле
+            local adaptiveSpeed = State.fly.isNearGround and (moveSpeed * 0.85) or moveSpeed
+            State.fly.hm.WalkSpeed = adaptiveSpeed
+            
+            -- Естественное движение через Humanoid
+            State.fly.hm:Move(State.flyDir, false)
+            
+            -- Плавная коррекция velocity с учётом микро-колебаний
+            local targetVel = State.flyDir * adaptiveSpeed
+            local currentVel = State.fly.hr.Velocity
+            
+            -- Добавляем небольшие колебания к velocity для естественности
+            local velocityNoise = Vector3.new(
+                math.sin(State.fly.microTime * 5.3) * 0.3,
+                math.cos(State.fly.microTime * 3.7) * 0.2,
+                math.sin(State.fly.microTime * 4.1) * 0.3
+            )
+            
+            State.fly.hr.Velocity = currentVel:Lerp(targetVel + velocityNoise, State.fly.velocitySmoothing)
+            
+            -- Имитация инерции при изменении направления
+            local velocityDiff = (targetVel - currentVel).Magnitude
+            if velocityDiff > 5 then
+                State.fly.velocitySmoothing = 0.15 -- Медленнее при резких поворотах
+            else
+                State.fly.velocitySmoothing = 0.25 -- Быстрее при плавном движении
+            end
+        else
+            -- Плавная остановка с имитацией трения
+            State.fly.hm.WalkSpeed = State.fly.originalWalkSpeed
+            local currentVel = State.fly.hr.Velocity
+            State.fly.hr.Velocity = Vector3.new(
+                currentVel.X * 0.88,
+                currentVel.Y * 0.95,
+                currentVel.Z * 0.88
+            )
+        end
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- УМНОЕ УПРАВЛЕНИЕ СОСТОЯНИЯМИ
+        -- ═══════════════════════════════════════════════════════════════════════
+        local currentState = State.fly.hm:GetState()
+        
+        -- Разрешаем кратковременное падение для естественности
+        if currentTime - State.fly.lastStateChange >= State.fly.stateChangeDelay then
+            if currentState == Enum.HumanoidStateType.Freefall or 
+               currentState == Enum.HumanoidStateType.FallingDown then
+                -- Возвращаем в состояние бега только если прошло достаточно времени
+                if math.random() > 0.3 then -- 70% шанс вернуться в бег
+                    State.fly.hm:ChangeState(Enum.HumanoidStateType.Running)
+                    State.fly.lastStateChange = currentTime
+                end
+            elseif currentState ~= Enum.HumanoidStateType.Running and 
+                   currentState ~= Enum.HumanoidStateType.RunningNoPhysics then
+                -- Для других состояний возвращаем в бег
+                State.fly.hm:ChangeState(Enum.HumanoidStateType.Running)
+                State.fly.lastStateChange = currentTime
+            end
+        end
+        
+        -- ═══════════════════════════════════════════════════════════════════════
+        -- ОГРАНИЧЕНИЕ СКОРОСТИ ПАДЕНИЯ (антидетект)
+        -- ═══════════════════════════════════════════════════════════════════════
+        if State.fly.hr.Velocity.Y < -50 then
+            State.fly.hr.Velocity = Vector3.new(
+                State.fly.hr.Velocity.X,
+                -50,
+                State.fly.hr.Velocity.Z
+            )
+        end
+    end)
+end
+
 local function Fly_Init()
     Fly_Cleanup()
     if not getgenv().aim_settings.fly_enabled then return end
@@ -6748,12 +8833,183 @@ local function Fly_Init()
         Fly_Mode_Platform()
     elseif State.fly.mode == "Velocity" then
         Fly_Mode_Velocity()
+    elseif State.fly.mode == "Climb" then
+        Fly_Mode_Climb()
+    elseif State.fly.mode == "Seat" then
+        Fly_Mode_Seat()
+    elseif State.fly.mode == "Test" then
+        Fly_Mode_Test()
+    elseif State.fly.mode == "Lags" then
+        Fly_Mode_Lags()
+    elseif State.fly.mode == "Legit" then
+        Fly_Mode_Legit()
     else
         Fly_Mode_Tween()
     end
 end
 
+-- Clumsy Functions
+local function Clumsy_Cleanup()
+    if State.clumsy then
+        if State.clumsy.connection then State.clumsy.connection:Disconnect() end
+        if State.clumsy.bodyGyro then State.clumsy.bodyGyro:Destroy() end
+        if State.clumsy.bodyVelocity then State.clumsy.bodyVelocity:Destroy() end
+        if State.clumsy.weld then State.clumsy.weld:Destroy() end
+        if State.clumsy.seat then State.clumsy.seat:Destroy() end
+        if State.clumsy.clone then State.clumsy.clone:Destroy() end
+        State.clumsy = {}
+    end
+end
+
+local function Clumsy_Init()
+    Clumsy_Cleanup()
+    if not getgenv().aim_settings.clumsy_enabled then return end
+    
+    State.clumsy = {ch = G.LP.Character}
+    if not State.clumsy.ch then return end
+    State.clumsy.hr = State.clumsy.ch:FindFirstChild("HumanoidRootPart")
+    State.clumsy.hm = State.clumsy.ch:FindFirstChildOfClass("Humanoid")
+    if not State.clumsy.hr or not State.clumsy.hm then return end
+    
+    -- Создаем клон персонажа если Visualize включен
+    if getgenv().aim_settings.clumsy_visualize then
+        pcall(function()
+            State.clumsy.clone = State.clumsy.ch:Clone()
+            
+            -- Удаляем скрипты из клона
+            for _, obj in pairs(State.clumsy.clone:GetDescendants()) do
+                if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+                    obj:Destroy()
+                end
+            end
+            
+            -- Делаем все части полупрозрачными и неколлизионными
+            for _, obj in pairs(State.clumsy.clone:GetDescendants()) do
+                if obj:IsA("BasePart") then
+                    obj.Anchored = true
+                    obj.CanCollide = false
+                    obj.Transparency = 0.5
+                end
+            end
+            
+            -- Удаляем Humanoid из клона
+            local cloneHumanoid = State.clumsy.clone:FindFirstChildOfClass("Humanoid")
+            if cloneHumanoid then
+                cloneHumanoid:Destroy()
+            end
+            
+            -- Размещаем клон в workspace
+            State.clumsy.clone.Parent = workspace
+        end)
+    end
+    
+    -- Создаем невидимое сиденье
+    State.clumsy.seat = Instance.new("Seat", workspace)
+    State.clumsy.seat.Name = "ClumsySeat"
+    State.clumsy.seat.Size = Vector3.new(2, 0.5, 2)
+    State.clumsy.seat.Anchored = false
+    State.clumsy.seat.CanCollide = false
+    State.clumsy.seat.Transparency = 1
+    State.clumsy.seat.CastShadow = false
+    
+    -- Позиционируем сиденье
+    State.clumsy.seat.CFrame = State.clumsy.hr.CFrame * CFrame.new(0, -2, 0)
+    
+    -- Делаем сиденье невесомым
+    State.clumsy.bodyVelocity = Instance.new("BodyVelocity", State.clumsy.seat)
+    State.clumsy.bodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    State.clumsy.bodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    
+    State.clumsy.bodyGyro = Instance.new("BodyGyro", State.clumsy.seat)
+    State.clumsy.bodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    State.clumsy.bodyGyro.P = 9e4
+    
+    -- Принудительно сажаем персонажа
+    State.clumsy.hm.Sit = true
+    
+    -- Создаем Weld чтобы привязать персонажа к сиденью
+    State.clumsy.weld = Instance.new("Weld", State.clumsy.seat)
+    State.clumsy.weld.Part0 = State.clumsy.seat
+    State.clumsy.weld.Part1 = State.clumsy.hr
+    State.clumsy.weld.C0 = CFrame.new(0, 2, 0)
+    
+    State.clumsy.connection = G.RS.Heartbeat:Connect(function()
+        local s = getgenv().aim_settings
+        if not (s.clumsy_enabled and State.clumsy.ch and State.clumsy.hr and State.clumsy.seat and State.clumsy.bodyVelocity and State.clumsy.bodyGyro) then 
+            Clumsy_Cleanup() 
+            return 
+        end
+        
+        -- Управление направлением
+        State.clumsy.bodyGyro.CFrame = G.Cam.CFrame
+        
+        -- Получаем направление движения
+        local moveDir = Vector3.new(0, 0, 0)
+        if G.UIS:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + G.Cam.CFrame.LookVector end
+        if G.UIS:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - G.Cam.CFrame.LookVector end
+        if G.UIS:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - G.Cam.CFrame.RightVector end
+        if G.UIS:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + G.Cam.CFrame.RightVector end
+        if G.UIS:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+        if G.UIS:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+        
+        -- Применяем движение
+        State.clumsy.bodyVelocity.Velocity = moveDir * s.clumsy_speed
+    end)
+end
+
+-- Инициализация Clumsy при включении
+G.LP.CharacterAdded:Connect(function()
+    task.wait(1)
+    if getgenv().aim_settings.clumsy_enabled then
+        Clumsy_Init()
+    end
+end)
+
+if G.LP.Character then
+    task.spawn(function()
+        task.wait(1)
+        if getgenv().aim_settings.clumsy_enabled then
+            Clumsy_Init()
+        end
+    end)
+end
+
+-- Цикл для отслеживания изменений Clumsy
+task.spawn(function()
+    local lastVisualize = getgenv().aim_settings.clumsy_visualize
+    while getgenv().aim_settings.running do
+        task.wait(0.5)
+        local s = getgenv().aim_settings
+        
+        -- Проверяем изменение Visualize
+        if s.clumsy_visualize ~= lastVisualize then
+            lastVisualize = s.clumsy_visualize
+            if s.clumsy_enabled then
+                Clumsy_Init() -- Пересоздаем с новыми настройками
+            end
+        end
+        
+        if s.clumsy_enabled and not State.clumsy.connection then
+            Clumsy_Init()
+        elseif not s.clumsy_enabled and State.clumsy.connection then
+            Clumsy_Cleanup()
+        end
+    end
+end)
+
 -- Инициализация Infinite Jump
+for _, player in ipairs(G.Plr:GetPlayers()) do
+    trackPlayerEsp(player)
+end
+
+State.connections.playerEspPlayerAdded = G.Plr.PlayerAdded:Connect(function(player)
+    trackPlayerEsp(player)
+end)
+
+State.connections.playerEspPlayerRemoving = G.Plr.PlayerRemoving:Connect(function(player)
+    untrackPlayerEsp(player)
+end)
+
 State.connections.characterAdded = G.LP.CharacterAdded:Connect(function() 
     wait(0.5) 
     IJ_I()
@@ -6762,6 +9018,7 @@ State.connections.characterAdded = G.LP.CharacterAdded:Connect(function()
     Movement.SmoothFall.Init()
     Movement.Speed.Init()
     Fly_Init()
+    restoreAllViewmodelParts()
     
     -- Очищаем трейлы при смерти персонажа
     if State.trails.trail then
@@ -6873,6 +9130,10 @@ State.connections.flyLoop = G.RS.Heartbeat:Connect(function()
     else
         if State.fly and State.fly.connection then Fly_Cleanup() end
     end
+end)
+
+State.connections.targetStrafeLoop = G.RS.Heartbeat:Connect(function(deltaTime)
+    updateTargetStrafe(deltaTime)
 end)
 
 if G.LP.Character then 
