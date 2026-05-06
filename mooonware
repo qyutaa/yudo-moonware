@@ -5836,42 +5836,59 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
             if tp then
                 local te = tp:FindFirstChild("Y_Target_ESP")
                 
-                if s.target_esp and State.LockedTarget and State.LockedTarget.Parent == p.Character then
+                -- УДАЛЯЕМ Target ESP если target_esp выключен
+                if not s.target_esp then
+                    if te then
+                        te:Destroy()
+                    end
+                    -- Очищаем с других частей тела тоже
+                    local head = p.Character:FindFirstChild("Head")
+                    local torso = p.Character:FindFirstChild("UpperTorso") or p.Character:FindFirstChild("Torso")
+                    if head and head:FindFirstChild("Y_Target_ESP") then
+                        head:FindFirstChild("Y_Target_ESP"):Destroy()
+                    end
+                    if torso and torso:FindFirstChild("Y_Target_ESP") then
+                        torso:FindFirstChild("Y_Target_ESP"):Destroy()
+                    end
+                elseif s.target_esp and State.LockedTarget and State.LockedTarget.Parent == p.Character then
                     if not te then
                         te = Instance.new("BillboardGui", tp)
                         te.Name = "Y_Target_ESP"
-                        te.Size = UDim2.new(0, 100, 0, 100)
+                        te.Size = UDim2.new(0, 200, 0, 200) -- Нормальный размер
                         te.StudsOffset = Vector3.new(0, 0, 0)
-                        targetESP.AlwaysOnTop = true
+                        te.AlwaysOnTop = true
+                        te.MaxDistance = 2000
                         
                         -- Контейнер для вращения
-                        local container = Instance.new("Frame", targetESP)
+                        local container = Instance.new("Frame", te)
                         container.Name = "Container"
                         container.Size = UDim2.new(1, 0, 1, 0)
                         container.Position = UDim2.new(0.5, 0, 0.5, 0)
                         container.AnchorPoint = Vector2.new(0.5, 0.5)
                         container.BackgroundTransparency = 1
                         
-                        -- Crosshair Mode - Горизонтальная линия
+                        -- Crosshair Mode - Горизонтальная линия (УМЕНЬШЕНА)
                         local lineH = Instance.new("Frame", container)
                         lineH.Name = "LineH"
-                        lineH.Size = UDim2.new(0, 20, 0, 2)
+                        lineH.Size = UDim2.new(0, 20, 0, 2) -- Уменьшено с 30x3 до 20x2
                         lineH.Position = UDim2.new(0.5, 0, 0.5, 0)
                         lineH.AnchorPoint = Vector2.new(0.5, 0.5)
                         lineH.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                         lineH.BorderSizePixel = 0
+                        lineH.ZIndex = 10
                         local lineHGradient = Instance.new("UIGradient", lineH)
                         lineHGradient.Name = "LineGradient"
                         lineHGradient.Rotation = 0
                         
-                        -- Crosshair Mode - Вертикальная линия
+                        -- Crosshair Mode - Вертикальная линия (УМЕНЬШЕНА)
                         local lineV = Instance.new("Frame", container)
                         lineV.Name = "LineV"
-                        lineV.Size = UDim2.new(0, 2, 0, 20)
+                        lineV.Size = UDim2.new(0, 2, 0, 20) -- Уменьшено с 3x30 до 2x20
                         lineV.Position = UDim2.new(0.5, 0, 0.5, 0)
                         lineV.AnchorPoint = Vector2.new(0.5, 0.5)
                         lineV.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                         lineV.BorderSizePixel = 0
+                        lineV.ZIndex = 10
                         local lineVGradient = Instance.new("UIGradient", lineV)
                         lineVGradient.Name = "LineGradient"
                         lineVGradient.Rotation = 90
@@ -5879,19 +5896,21 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
                         -- Circle Mode - Картинка с градиентом
                         local circleImage = Instance.new("ImageLabel", container)
                         circleImage.Name = "CircleImage"
-                        circleImage.Size = UDim2.new(0, 80, 0, 80)
+                        circleImage.Size = UDim2.new(0, 100, 0, 100) -- НОРМАЛЬНЫЙ размер как на скрине
                         circleImage.Position = UDim2.new(0.5, 0, 0.5, 0)
                         circleImage.AnchorPoint = Vector2.new(0.5, 0.5)
                         circleImage.BackgroundTransparency = 1
                         circleImage.Image = "rbxassetid://77511689678153"
                         circleImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
+                        circleImage.ImageTransparency = 0
                         circleImage.Visible = false
+                        circleImage.ZIndex = 10
                         
-                        -- Добавляем UIGradient для эффекта градиента как в Квадрате
+                        -- Добавляем UIGradient для эффекта градиента
                         local circleGradient = Instance.new("UIGradient", circleImage)
-                        cg.Name = "CircleGradient"
-                        cg.Rotation = 0
-                        cg.Color = ColorSequence.new({
+                        circleGradient.Name = "CircleGradient"
+                        circleGradient.Rotation = 0
+                        circleGradient.Color = ColorSequence.new({
                             ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
                             ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 255, 255))
                         })
@@ -5917,35 +5936,42 @@ State.connections.mainLoop = G.RS.RenderStepped:Connect(function()
                             c.LineH.Visible = false
                             c.LineV.Visible = false
                             c.CircleImage.Visible = true
-                            c.Rotation = math.sin(tick() / 1.0) * 360
+                            -- ПЛАВНОЕ ВРАЩЕНИЕ с настраиваемой скоростью
+                            c.Rotation = (tick() * (s.target_esp_rotation_speed or 60)) % 360
                             
                             local g = c.CircleImage:FindFirstChild("CircleGradient")
                             if g then
-                                g.Color = eg
+                                -- RAINBOW для Circle тоже!
+                                if s.rainbow_crosshair then
+                                    g.Color = eg
+                                else
+                                    g.Color = eg
+                                end
                                 c.CircleImage.ImageColor3 = Color3.fromRGB(255, 255, 255)
                             end
                         else
+                            -- Crosshair Mode
                             c.LineH.Visible = true
                             c.LineV.Visible = true
                             c.CircleImage.Visible = false
                             c.Rotation = 0
 
-                            container.LineH.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                            container.LineV.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-                            local lineHGradient = container.LineH:FindFirstChild("LineGradient")
-                            local lineVGradient = container.LineV:FindFirstChild("LineGradient")
+                            c.LineH.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                            c.LineV.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                            local lineHGradient = c.LineH:FindFirstChild("LineGradient")
+                            local lineVGradient = c.LineV:FindFirstChild("LineGradient")
                             if lineHGradient then
-                                lineHGradient.Color = espGradient
+                                lineHGradient.Color = eg
                             end
                             if lineVGradient then
-                                lineVGradient.Color = espGradient
+                                lineVGradient.Color = eg
                             end
                         end
                     end
                 else
-                    -- Скрываем ESP если это не цель
-                    if targetESP then
-                        targetESP.Enabled = false
+                    -- Скрываем/удаляем ESP если это не цель
+                    if te then
+                        te:Destroy()
                     end
                 end
                 
