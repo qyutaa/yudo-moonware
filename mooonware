@@ -3110,8 +3110,10 @@ local function updateHitboxes()
                     head.CanCollide = false
                     head.Anchored = false
                     head.Massless = true
+                    head.CanTouch = true
+                    head.CanQuery = true
                     
-                    -- УЛУЧШЕНИЕ: Добавляем TouchInterest для регистрации урона внутри хитбокса
+                    -- TouchInterest для регистрации урона внутри хитбокса
                     if not head:FindFirstChild("TouchInterest") then
                         local touch = Instance.new("TouchTransmitter")
                         touch.Parent = head
@@ -3125,8 +3127,10 @@ local function updateHitboxes()
                     hrp.Color = color
                     hrp.Material = Enum.Material.Neon
                     hrp.CanCollide = false
+                    hrp.CanTouch = true
+                    hrp.CanQuery = true
                     
-                    -- УЛУЧШЕНИЕ: Добавляем TouchInterest для регистрации урона внутри хитбокса
+                    -- TouchInterest для регистрации урона внутри хитбокса
                     if not hrp:FindFirstChild("TouchInterest") then
                         local touch = Instance.new("TouchTransmitter")
                         touch.Parent = hrp
