@@ -3110,6 +3110,12 @@ local function updateHitboxes()
                     head.CanCollide = false
                     head.Anchored = false
                     head.Massless = true
+                    
+                    -- УЛУЧШЕНИЕ: Добавляем TouchInterest для регистрации урона внутри хитбокса
+                    if not head:FindFirstChild("TouchInterest") then
+                        local touch = Instance.new("TouchTransmitter")
+                        touch.Parent = head
+                    end
                 end)
             elseif partName == "Body" and v.Character:FindFirstChild("HumanoidRootPart") then
                 pcall(function()
@@ -3119,6 +3125,12 @@ local function updateHitboxes()
                     hrp.Color = color
                     hrp.Material = Enum.Material.Neon
                     hrp.CanCollide = false
+                    
+                    -- УЛУЧШЕНИЕ: Добавляем TouchInterest для регистрации урона внутри хитбокса
+                    if not hrp:FindFirstChild("TouchInterest") then
+                        local touch = Instance.new("TouchTransmitter")
+                        touch.Parent = hrp
+                    end
                 end)
             end
         end
