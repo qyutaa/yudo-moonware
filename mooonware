@@ -3474,7 +3474,7 @@ function CategoryPanel:addModule(moduleName, settingKey, hasSettings)
     btnScale.Scale = 1
     
     local btnStroke = Instance.new("UIStroke", btn)
-    btnStroke.Color = THEME.MODULE_STROKE
+    btnStroke.Color = Color3.fromRGB(100, 100, 100) -- Серая обводка
     btnStroke.Thickness = 1
     
     local nameLbl = Instance.new("TextLabel", btn)
@@ -4338,9 +4338,30 @@ local function animatePanels(show)
             ScreenGui.Enabled = true
             panelAnimationState = "showing"
             panelAnimationProgress = 0
+            
+            -- ВОССТАНАВЛИВАЕМ СОХРАНЁННЫЕ ПОЗИЦИИ ПАНЕЛЕЙ
+            for i, panel in ipairs(State.panels) do
+                if panel.savedPosition then
+                    panelOriginalPositions[i] = panel.savedPosition
+                end
+            end
         end
     else
         if panelAnimationState == "visible" then
+            -- СОХРАНЯЕМ ТЕКУЩИЕ ПОЗИЦИИ ПАНЕЛЕЙ ПЕРЕД СКРЫТИЕМ
+            for i, panel in ipairs(State.panels) do
+                -- Получаем текущую позицию панели (top-left corner)
+                local currentPos = panel.frame.Position
+                local anchorPoint = panel.frame.AnchorPoint
+                
+                -- Конвертируем в top-left позицию если нужно
+                local topLeftX = currentPos.X.Offset - (panel.frame.Size.X.Offset * anchorPoint.X)
+                local topLeftY = currentPos.Y.Offset - (panel.frame.Size.Y.Offset * anchorPoint.Y)
+                
+                panel.savedPosition = UDim2.new(currentPos.X.Scale, topLeftX, currentPos.Y.Scale, topLeftY)
+                panelOriginalPositions[i] = panel.savedPosition
+            end
+            
             panelAnimationState = "hiding"
             panelAnimationProgress = 0
         end
@@ -4938,7 +4959,7 @@ end
 
 -- Добавляем элементы в категорию Config
 -- TextBox для имени конфига
-pConfig:addTextBox("Config Name", "config_name", "Введите название...")
+pConfig:addTextBox("Config Name", "config_name", "Enter name...")
 
 local updateConfigList
 
